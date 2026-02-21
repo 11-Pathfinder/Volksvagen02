@@ -102,15 +102,15 @@ def _scrape_via_browser() -> list[dict]:
             _dismiss_cookie_banner(page)
 
             # Wait for dynamic content to load
-            page.wait_for_timeout(5000)
+            page.wait_for_timeout(2000)
 
             # Scroll to trigger lazy loading
-            for _ in range(5):
+            for _ in range(3):
                 page.keyboard.press("End")
-                page.wait_for_timeout(1500)
+                page.wait_for_timeout(1000)
 
             # Wait a bit more for any final API calls
-            page.wait_for_timeout(3000)
+            page.wait_for_timeout(1500)
 
             # === Extraction Phase ===
 
