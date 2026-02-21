@@ -41,12 +41,18 @@ def scrape_listings() -> list[dict]:
     # Primary strategy: headless browser with network interception
     print("[Strategy 1] Headless browser with network interception...")
     listings = _scrape_via_browser()
-    if listings:
-        return listings
+    if not listings:
+        # Fallback: requests + BeautifulSoup (works if site returns server-rendered HTML)
+        print("[Strategy 2] Attempting requests + HTML parsing...")
+        listings = _scrape_via_requests()
 
-    # Fallback: requests + BeautifulSoup (works if site returns server-rendered HTML)
-    print("[Strategy 2] Attempting requests + HTML parsing...")
-    listings = _scrape_via_requests()
+    # Post-extraction: filter out non-vehicle entries
+    before = len(listings)
+    listings = _filter_valid_listings(listings)
+    after = len(listings)
+    if before != after:
+        print(f"  Filtered out {before - after} non-vehicle entries ({before} -> {after})")
+
     return listings
 
 
@@ -720,15 +726,32 @@ def _find_vehicles_in_obj(obj, depth=0) -> list[dict]:
 
     if isinstance(obj, dict):
         keys_lower = {k.lower() for k in obj.keys()}
-        vehicle_keys = {"price", "mileage", "model", "make", "title", "name"}
-        if len(keys_lower & vehicle_keys) >= 2:
-            results.append({
-                "title": obj.get("title") or obj.get("name") or obj.get("model", ""),
-                "price": str(obj.get("price", "")),
+        # Require strong evidence: price + at least one identifier (title/name/model)
+        has_price = "price" in keys_lower or "retailprice" in keys_lower
+        has_identity = bool(keys_lower & {"title", "name", "model", "make"})
+        has_vehicle_detail = bool(keys_lower & {"mileage", "mileagefromodometer",
+                                                 "year", "registration", "vin",
+                                                 "fueltype", "fuel", "transmission",
+                                                 "engine", "colour", "color"})
+        # Must have price + identity + at least one vehicle-specific field,
+        # OR have 4+ vehicle-related keys (strong signal)
+        is_vehicle = (has_price and has_identity and has_vehicle_detail) or \
+                     len(keys_lower & {"price", "mileage", "model", "make",
+                                       "title", "name", "year", "vin",
+                                       "registration", "fueltype"}) >= 4
+        if is_vehicle:
+            title = obj.get("title") or obj.get("name") or obj.get("model", "")
+            price = str(obj.get("price") or obj.get("retailPrice", ""))
+            candidate = {
+                "title": title,
+                "price": price,
                 "mileage": str(obj.get("mileage", "")),
                 "year": str(obj.get("year") or obj.get("registration", "")),
                 "url": obj.get("url") or obj.get("link", ""),
-            })
+            }
+            # Only include if it looks like a real vehicle listing
+            if _looks_like_vehicle(candidate):
+                results.append(candidate)
         else:
             for v in obj.values():
                 results.extend(_find_vehicles_in_obj(v, depth + 1))
@@ -737,6 +760,65 @@ def _find_vehicles_in_obj(obj, depth=0) -> list[dict]:
             results.extend(_find_vehicles_in_obj(item, depth + 1))
 
     return results
+
+
+def _looks_like_vehicle(listing: dict) -> bool:
+    """Check whether a candidate listing looks like a real vehicle."""
+    title = str(listing.get("title") or listing.get("raw_text") or "")
+    price = str(listing.get("price", ""))
+
+    # Must have a non-empty title or raw_text
+    if not title.strip():
+        return False
+
+    # Price must look numeric (digits, commas, dots, £ sign, or raw number)
+    price_clean = price.replace("£", "").replace(",", "").replace(".", "").strip()
+    if price_clean and not price_clean.isdigit():
+        return False
+
+    # Title should be more than just a single word (filters, labels)
+    if len(title.split()) < 2:
+        return False
+
+    return True
+
+
+def _filter_valid_listings(listings: list[dict]) -> list[dict]:
+    """Filter out entries that are clearly not real vehicle listings."""
+    valid = []
+    for listing in listings:
+        text = str(
+            listing.get("title")
+            or listing.get("raw_text")
+            or ""
+        ).lower()
+        price = str(listing.get("price", ""))
+
+        # Skip entries with no meaningful text
+        if not text.strip():
+            continue
+
+        # Skip entries that are obviously not cars (common false positives)
+        skip_phrases = [
+            "cookie", "consent", "privacy", "accept all",
+            "sign in", "sign up", "log in", "register",
+            "newsletter", "subscribe", "feedback",
+            "filter", "sort by", "show more", "load more",
+            "compare", "save search", "create alert",
+        ]
+        if any(phrase in text for phrase in skip_phrases):
+            continue
+
+        # If we have a price, it should be in a reasonable car range (£1,000 - £999,999)
+        if price:
+            price_digits = re.sub(r'[^\d]', '', price)
+            if price_digits:
+                price_num = int(price_digits)
+                if price_num < 1000 or price_num > 999999:
+                    continue
+
+        valid.append(listing)
+    return valid
 
 
 def _deduplicate(listings: list[dict]) -> list[dict]:

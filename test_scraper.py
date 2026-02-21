@@ -15,6 +15,7 @@ from scraper import (
     _normalize_ld_json,
     _parse_api_response,
     _parse_listings_from_text,
+    _filter_valid_listings,
     _deduplicate,
     save_listings,
 )
@@ -192,6 +193,36 @@ def test_parse_listings_from_text_empty():
     print("  PASS test_parse_listings_from_text_empty")
 
 
+def test_find_vehicles_rejects_weak_matches():
+    """Test that objects with only 2 generic keys are not matched."""
+    # Only 'name' and 'price' without any vehicle-specific field -> rejected
+    data = {
+        "filters": [
+            {"name": "ID.4", "price": 25000},
+        ]
+    }
+    found = _find_vehicles_in_obj(data)
+    assert len(found) == 0, f"Expected 0 (weak match), got {len(found)}"
+    print("  PASS test_find_vehicles_rejects_weak_matches")
+
+
+def test_filter_valid_listings():
+    """Test that non-car entries are filtered out."""
+    listings = [
+        {"title": "Volkswagen ID.4 Pure Performance", "price": "£25,990"},
+        {"title": "Cookie consent preferences", "price": ""},
+        {"title": "Sign in to your account", "price": ""},
+        {"title": "X", "price": "£5"},  # single-word title, tiny price
+        {"title": "Volkswagen ID.5 GTX 77kWh", "price": "£29,000"},
+    ]
+    valid = _filter_valid_listings(listings)
+    titles = [l.get("title", "") for l in valid]
+    assert len(valid) == 2, f"Expected 2 valid, got {len(valid)}: {titles}"
+    assert "Volkswagen ID.4 Pure Performance" in titles
+    assert "Volkswagen ID.5 GTX 77kWh" in titles
+    print("  PASS test_filter_valid_listings")
+
+
 def test_deduplicate():
     """Test deduplication of listings."""
     listings = [
@@ -330,6 +361,8 @@ def run_all_tests():
         test_parse_api_response_empty,
         test_parse_listings_from_text,
         test_parse_listings_from_text_empty,
+        test_find_vehicles_rejects_weak_matches,
+        test_filter_valid_listings,
         test_deduplicate,
         test_save_and_load_listings,
         test_build_html_email,
