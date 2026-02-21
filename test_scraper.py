@@ -14,6 +14,8 @@ from scraper import (
     _find_vehicles_in_obj,
     _normalize_ld_json,
     _parse_api_response,
+    _parse_listings_from_text,
+    _deduplicate,
     save_listings,
 )
 from email_sender import build_html_email, build_plain_text, load_listings
@@ -25,21 +27,21 @@ SAMPLE_LISTINGS = [
         "price": "£25,990",
         "mileage": "8,500 miles",
         "year": "2024",
-        "url": "https://usedcars.volkswagen.co.uk/en/vehicle_detail/volkswagen/12345",
+        "url": "https://usedcars.volkswagen.co.uk/en/vehicle_search/volkswagen/id-4/pure-perf-abc123/offer",
     },
     {
         "title": "Volkswagen ID.5 GTX 77kWh 299PS AWD",
         "price": "£29,450",
         "mileage": "3,200 miles",
         "year": "2024",
-        "url": "https://usedcars.volkswagen.co.uk/en/vehicle_detail/volkswagen/67890",
+        "url": "https://usedcars.volkswagen.co.uk/en/vehicle_search/volkswagen/id-5/gtx-def456/offer",
     },
     {
         "title": "Volkswagen ID.4 Pro Performance 77kWh 286PS",
         "price": "£27,500",
         "mileage": "12,100 miles",
         "year": "2024",
-        "url": "https://usedcars.volkswagen.co.uk/en/vehicle_detail/volkswagen/11111",
+        "url": "https://usedcars.volkswagen.co.uk/en/vehicle_search/volkswagen/id-4/pro-perf-ghi789/offer",
     },
 ]
 
@@ -158,6 +160,50 @@ def test_parse_api_response_empty():
     print("  PASS test_parse_api_response_empty")
 
 
+# ── Text parsing tests ────────────────────────────────────────────────────
+
+def test_parse_listings_from_text():
+    """Test extracting listings from unstructured text."""
+    text = """
+Some header text
+
+Volkswagen ID.4 Pure Performance 52kWh 170PS
+£25,990
+8,500 miles
+2024
+
+Volkswagen ID.5 GTX 77kWh 299PS AWD
+£29,450
+3,200 miles
+2024
+"""
+    listings = _parse_listings_from_text(text)
+    assert len(listings) == 2, f"Expected 2 listings, got {len(listings)}"
+    assert "ID.4" in listings[0].get("title", listings[0].get("raw_text", ""))
+    assert listings[0]["price"] == "£25,990"
+    print("  PASS test_parse_listings_from_text")
+
+
+def test_parse_listings_from_text_empty():
+    """Test text parsing with no vehicle data."""
+    text = "Welcome to our website. Please search for vehicles."
+    listings = _parse_listings_from_text(text)
+    assert len(listings) == 0
+    print("  PASS test_parse_listings_from_text_empty")
+
+
+def test_deduplicate():
+    """Test deduplication of listings."""
+    listings = [
+        {"title": "VW ID.4", "url": "https://example.com/1"},
+        {"title": "VW ID.5", "url": "https://example.com/2"},
+        {"title": "VW ID.4", "url": "https://example.com/1"},  # duplicate
+    ]
+    unique = _deduplicate(listings)
+    assert len(unique) == 2, f"Expected 2 unique, got {len(unique)}"
+    print("  PASS test_deduplicate")
+
+
 # ── Save/Load tests ────────────────────────────────────────────────────────
 
 def test_save_and_load_listings():
@@ -206,7 +252,7 @@ def test_build_html_email():
     assert "£29,450" in html
     assert "8,500 miles" in html
     assert "<strong>3</strong> vehicle(s) found" in html
-    assert "vehicle_detail" in html
+    assert "vehicle_search" in html
     print("  PASS test_build_html_email")
 
 
@@ -282,6 +328,9 @@ def run_all_tests():
         test_parse_api_response_list,
         test_parse_api_response_make_model,
         test_parse_api_response_empty,
+        test_parse_listings_from_text,
+        test_parse_listings_from_text_empty,
+        test_deduplicate,
         test_save_and_load_listings,
         test_build_html_email,
         test_build_html_email_empty,

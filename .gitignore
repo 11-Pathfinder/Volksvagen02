@@ -11,6 +11,7 @@ venv/
 # Scraper output
 listings.json
 debug_page.html
+debug_screenshot.png
 debug_scraper.py
 
 # Environment
