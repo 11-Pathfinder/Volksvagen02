@@ -780,6 +780,16 @@ def _looks_like_vehicle(listing: dict) -> bool:
     if len(title.split()) < 2:
         return False
 
+    # Reject titles that are clearly UI elements, not car names
+    title_lower = title.lower()
+    ui_phrases = [
+        "personalise", "personalize", "finance option", "vehicle details",
+        "view details", "book a test", "cookie", "consent", "sign in",
+        "subscribe", "newsletter", "calculate", "get a quote",
+    ]
+    if any(phrase in title_lower for phrase in ui_phrases):
+        return False
+
     return True
 
 
@@ -800,11 +810,34 @@ def _filter_valid_listings(listings: list[dict]) -> list[dict]:
 
         # Skip entries that are obviously not cars (common false positives)
         skip_phrases = [
-            "cookie", "consent", "privacy", "accept all",
-            "sign in", "sign up", "log in", "register",
-            "newsletter", "subscribe", "feedback",
+            # Cookie / consent / legal
+            "cookie", "consent", "privacy", "accept all", "terms and conditions",
+            "data protection", "legal notice",
+            # Account / auth
+            "sign in", "sign up", "log in", "register", "my account",
+            # Newsletter / marketing
+            "newsletter", "subscribe", "feedback", "contact us",
+            # UI controls
             "filter", "sort by", "show more", "load more",
-            "compare", "save search", "create alert",
+            "compare", "save search", "create alert", "back to top",
+            "next page", "previous page", "pagination",
+            # Finance / insurance UI elements (not actual car listings)
+            "personalise your finance", "personalize your finance",
+            "finance options", "finance calculator", "apply for finance",
+            "monthly payment", "representative example",
+            "part exchange", "part-exchange",
+            # Navigation / page sections
+            "vehicle details", "view details", "more details",
+            "book a test drive", "test drive", "request a callback",
+            "calculate finance", "get a quote", "reserve this",
+            "share this", "print this", "email this",
+            "similar vehicles", "you may also like", "recently viewed",
+            # Footer / header elements
+            "find a retailer", "find a dealer", "locate dealer",
+            "customer service", "help and support", "faq",
+            "accessibility", "sitemap", "careers",
+            # Social / sharing
+            "follow us", "share on", "facebook", "twitter", "instagram",
         ]
         if any(phrase in text for phrase in skip_phrases):
             continue
@@ -816,6 +849,22 @@ def _filter_valid_listings(listings: list[dict]) -> list[dict]:
                 price_num = int(price_digits)
                 if price_num < 1000 or price_num > 999999:
                     continue
+
+        # Positive validation: listing must look like an actual car
+        # Require a VW model identifier in the text OR in the title specifically,
+        # OR have strong structured vehicle signals (price + mileage or year)
+        has_car_model = bool(re.search(
+            r'(?:volkswagen|vw)\s+id[.\s]?[345]|id[.\s][345]',
+            text, re.IGNORECASE,
+        ))
+        has_price = bool(price and re.sub(r'[^\d]', '', price))
+        has_mileage = bool(listing.get("mileage"))
+        has_year = bool(listing.get("year"))
+
+        # Must have a recognisable car model name, OR have price + at least
+        # one other vehicle attribute (mileage or year)
+        if not has_car_model and not (has_price and (has_mileage or has_year)):
+            continue
 
         valid.append(listing)
     return valid

@@ -223,6 +223,56 @@ def test_filter_valid_listings():
     print("  PASS test_filter_valid_listings")
 
 
+def test_filter_rejects_ui_elements():
+    """Test that common website UI elements are filtered out."""
+    listings = [
+        # Valid cars - should pass
+        {"title": "Volkswagen ID.4 Pure Performance 52kWh", "price": "£25,990"},
+        {"title": "VW ID.5 GTX 77kWh 299PS AWD", "price": "£29,450"},
+        # Non-car UI elements - should be filtered
+        {"title": "Personalise your finance", "price": ""},
+        {"title": "Vehicle details", "price": ""},
+        {"title": "Book a test drive", "price": ""},
+        {"title": "View details for this car", "price": ""},
+        {"title": "Calculate finance options", "price": ""},
+        {"title": "Find a retailer near you", "price": ""},
+        {"title": "Share this vehicle", "price": ""},
+        {"title": "Representative example for finance", "price": ""},
+        {"title": "Part exchange your car", "price": ""},
+        {"title": "Monthly payment calculator", "price": ""},
+    ]
+    valid = _filter_valid_listings(listings)
+    titles = [l.get("title", "") for l in valid]
+    assert len(valid) == 2, f"Expected 2 valid, got {len(valid)}: {titles}"
+    assert "Volkswagen ID.4 Pure Performance 52kWh" in titles
+    assert "VW ID.5 GTX 77kWh 299PS AWD" in titles
+    print("  PASS test_filter_rejects_ui_elements")
+
+
+def test_filter_requires_positive_car_signal():
+    """Test that listings without car model or price+details are rejected."""
+    listings = [
+        # Has model name - should pass
+        {"title": "Volkswagen ID.4 Pure", "price": "£25,000"},
+        # Has price + mileage but no model - should pass (could be a valid listing
+        # with a generic title)
+        {"title": "Used Electric SUV", "price": "£27,000", "mileage": "5,000 miles"},
+        # Has price + year but no model - should pass
+        {"title": "Electric Vehicle Offer", "price": "£28,000", "year": "2024"},
+        # Only has title, no price/mileage/year/model - should be rejected
+        {"title": "Some random text entry", "price": ""},
+        # Only has price, no model/mileage/year - should be rejected
+        {"title": "Random listing title here", "price": "£20,000"},
+    ]
+    valid = _filter_valid_listings(listings)
+    titles = [l.get("title", "") for l in valid]
+    assert len(valid) == 3, f"Expected 3 valid, got {len(valid)}: {titles}"
+    assert "Volkswagen ID.4 Pure" in titles
+    assert "Used Electric SUV" in titles
+    assert "Electric Vehicle Offer" in titles
+    print("  PASS test_filter_requires_positive_car_signal")
+
+
 def test_deduplicate():
     """Test deduplication of listings."""
     listings = [
@@ -363,6 +413,8 @@ def run_all_tests():
         test_parse_listings_from_text_empty,
         test_find_vehicles_rejects_weak_matches,
         test_filter_valid_listings,
+        test_filter_rejects_ui_elements,
+        test_filter_requires_positive_car_signal,
         test_deduplicate,
         test_save_and_load_listings,
         test_build_html_email,
