@@ -100,7 +100,7 @@ def _scrape_via_api() -> list[dict]:
     for url in api_urls:
         try:
             print(f"  Trying: {url[:80]}...")
-            resp = requests.get(url, headers=headers, timeout=30)
+            resp = requests.get(url, headers=headers, timeout=30, proxies={"http": None, "https": None})
             if resp.status_code == 200:
                 data = resp.json()
                 listings = _parse_api_response(data)
@@ -175,7 +175,7 @@ def _scrape_via_requests() -> list[dict]:
     }
 
     try:
-        resp = requests.get(SEARCH_URL, headers=headers, timeout=30)
+        resp = requests.get(SEARCH_URL, headers=headers, timeout=30, proxies={"http": None, "https": None})
         print(f"  HTTP {resp.status_code}")
         if resp.status_code != 200:
             return []
@@ -230,7 +230,10 @@ def _scrape_via_browser() -> list[dict]:
 
     try:
         with sync_playwright() as p:
-            launch_opts = {"headless": True}
+            launch_opts = {
+                "headless": True,
+                "args": ["--no-proxy-server"],
+            }
             if executable:
                 launch_opts["executable_path"] = executable
 
