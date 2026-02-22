@@ -2,8 +2,6 @@
 Main entry point: runs the scraper and sends results via email.
 """
 
-import sys
-
 from scraper import scrape_listings, save_listings
 from email_sender import load_listings, build_html_email, build_plain_text, send_email
 
@@ -36,17 +34,19 @@ def main():
     html_body = build_html_email(data)
     text_body = build_plain_text(data)
 
-    try:
-        send_email(recipient, subject, html_body, text_body)
-        print("Email sent successfully!")
-    except KeyError as e:
-        print(f"ERROR: Missing environment variable {e}")
-        print("Set SMTP_USER and SMTP_PASS to enable email sending.")
-        print("Listings have been saved to listings.json")
-        sys.exit(1)
-    except Exception as e:
-        print(f"ERROR sending email: {e}")
-        sys.exit(1)
+    smtp_user = os.environ.get("SMTP_USER", "")
+    smtp_pass = os.environ.get("SMTP_PASS", "")
+
+    if not smtp_user or not smtp_pass:
+        print("SMTP_USER / SMTP_PASS not set — skipping email.")
+        print(f"Listings saved to {listings_path}")
+    else:
+        try:
+            send_email(recipient, subject, html_body, text_body)
+            print("Email sent successfully!")
+        except Exception as e:
+            print(f"WARNING: email sending failed: {e}")
+            print(f"Listings saved to {listings_path}")
 
     print("\nDone!")
 

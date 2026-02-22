@@ -36,7 +36,7 @@ jobs:
         run: python main.py
 
       - name: Upload debug artifacts
-        if: failure()
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: debug-${{ github.run_number }}
@@ -44,4 +44,5 @@ jobs:
             listings.json
             debug_page.html
             debug_screenshot.png
+          if-no-files-found: ignore
           retention-days: 30
