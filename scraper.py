@@ -117,7 +117,10 @@ def _scrape_via_browser() -> list[dict]:
             for resp_data in captured_api_responses:
                 api_url = resp_data["url"]
                 data = resp_data["data"]
-                vehicles = _find_vehicles_in_obj(data)
+                # Try structured parsing first (handles VW-specific field names)
+                vehicles = _parse_api_response(data)
+                if not vehicles:
+                    vehicles = _find_vehicles_in_obj(data)
                 if vehicles:
                     print(f"  Found {len(vehicles)} vehicles from API: {api_url[:120]}")
                     listings.extend(vehicles)
@@ -299,26 +302,32 @@ def _extract_card_data(card) -> dict:
     except Exception:
         pass
 
-    # Fallback: grab full text from the card
-    if not data.get("title"):
-        try:
-            full_text = card.inner_text().strip()
-            if full_text:
+    # Fallback: parse missing fields from the card's visible text
+    try:
+        full_text = card.inner_text().strip()
+        if full_text:
+            if not data.get("title"):
                 data["raw_text"] = full_text[:500]
-                # Try to parse price from raw text
-                price_match = re.search(r'\u00a3[\d,]+', full_text)
+                title_match = re.search(
+                    r'((?:Volkswagen|VW)\s+ID[.\s]?[345]\S*(?:\s+\S+){0,8})',
+                    full_text, re.IGNORECASE,
+                )
+                if title_match:
+                    data["title"] = title_match.group(1).strip()
+            if not data.get("price"):
+                price_match = re.search(r'£[\d,]+', full_text)
                 if price_match:
                     data["price"] = price_match.group()
-                # Try to parse year
+            if not data.get("year"):
                 year_match = re.search(r'\b(202[0-9])\b', full_text)
                 if year_match:
                     data["year"] = year_match.group(1)
-                # Try to parse mileage
+            if not data.get("mileage"):
                 mile_match = re.search(r'([\d,]+)\s*(?:miles|mi)', full_text, re.IGNORECASE)
                 if mile_match:
                     data["mileage"] = mile_match.group(1) + " miles"
-        except Exception:
-            pass
+    except Exception:
+        pass
 
     return data
 
@@ -663,40 +672,19 @@ def _parse_api_response(data: dict | list) -> list[dict]:
     if isinstance(data, list):
         vehicles = data
     elif isinstance(data, dict):
-        for key in ("results", "vehicles", "items", "data", "hits", "records",
-                     "offers", "listings", "searchResults", "content"):
-            if key in data and isinstance(data[key], list):
-                vehicles = data[key]
-                break
+        # Check common top-level wrapper keys (case-insensitive)
+        for key in list(data.keys()):
+            kl = key.lower()
+            if kl in ("results", "vehicles", "items", "data", "hits", "records",
+                       "offers", "listings", "searchresults", "content"):
+                if isinstance(data[key], list):
+                    vehicles = data[key]
+                    break
 
     for v in vehicles:
         if not isinstance(v, dict):
             continue
-        listing = {
-            "title": (
-                v.get("title")
-                or v.get("name")
-                or f"{v.get('make', '')} {v.get('model', '')}".strip()
-                or v.get("TITLE", "")
-            ),
-            "price": str(
-                v.get("price")
-                or v.get("retailPrice")
-                or v.get("PRICE_RETAIL_CUR_FLT", "")
-            ),
-            "mileage": str(
-                v.get("mileage")
-                or v.get("odometerReading")
-                or v.get("MILEAGE_MIL_INT", "")
-            ),
-            "year": str(
-                v.get("year")
-                or v.get("registrationDate", "")[:4]
-                if v.get("registrationDate")
-                else v.get("INITIAL_REGISTRATION_DTE", "")
-            ),
-            "url": v.get("url") or v.get("detailUrl") or "",
-        }
+        listing = _extract_vehicle_fields(v)
         if listing["title"]:
             listings.append(listing)
 
@@ -711,29 +699,34 @@ def _find_vehicles_in_obj(obj, depth=0) -> list[dict]:
 
     if isinstance(obj, dict):
         keys_lower = {k.lower() for k in obj.keys()}
-        # Require strong evidence: price + at least one identifier (title/name/model)
-        has_price = "price" in keys_lower or "retailprice" in keys_lower
-        has_identity = bool(keys_lower & {"title", "name", "model", "make"})
-        has_vehicle_detail = bool(keys_lower & {"mileage", "mileagefromodometer",
-                                                 "year", "registration", "vin",
-                                                 "fueltype", "fuel", "transmission",
-                                                 "engine", "colour", "color"})
+        keys_joined = " ".join(keys_lower)
+
+        # Use substring matching so VW-specific keys like
+        # 'price_retail_cur_flt' match the 'price' check
+        has_price = any(
+            kw in keys_joined
+            for kw in ("price", "retailprice")
+        )
+        has_identity = any(
+            kw in keys_joined
+            for kw in ("title", "name", "model", "make", "manufacturer")
+        )
+        has_vehicle_detail = any(
+            kw in keys_joined
+            for kw in ("mileage", "odometer", "year", "registration",
+                        "vin", "fuel", "transmission", "engine",
+                        "colour", "color")
+        )
         # Must have price + identity + at least one vehicle-specific field,
-        # OR have 4+ vehicle-related keys (strong signal)
+        # OR have 4+ vehicle-related keywords present
+        vehicle_keywords = ["price", "mileage", "model", "make",
+                            "title", "name", "year", "vin",
+                            "registration", "fuel"]
+        keyword_hits = sum(1 for kw in vehicle_keywords if kw in keys_joined)
         is_vehicle = (has_price and has_identity and has_vehicle_detail) or \
-                     len(keys_lower & {"price", "mileage", "model", "make",
-                                       "title", "name", "year", "vin",
-                                       "registration", "fueltype"}) >= 4
+                     keyword_hits >= 4
         if is_vehicle:
-            title = obj.get("title") or obj.get("name") or obj.get("model", "")
-            price = str(obj.get("price") or obj.get("retailPrice", ""))
-            candidate = {
-                "title": title,
-                "price": price,
-                "mileage": str(obj.get("mileage", "")),
-                "year": str(obj.get("year") or obj.get("registration", "")),
-                "url": obj.get("url") or obj.get("link", ""),
-            }
+            candidate = _extract_vehicle_fields(obj)
             # Only include if it looks like a real vehicle listing
             if _looks_like_vehicle(candidate):
                 results.append(candidate)
@@ -745,6 +738,69 @@ def _find_vehicles_in_obj(obj, depth=0) -> list[dict]:
             results.extend(_find_vehicles_in_obj(item, depth + 1))
 
     return results
+
+
+def _extract_vehicle_fields(obj: dict) -> dict:
+    """Extract vehicle fields from a dict, trying common and VW-specific key names."""
+    # Build a case-insensitive lookup for the object
+    lower_map = {k.lower(): k for k in obj.keys()}
+
+    def _get(*candidates):
+        """Return the first non-empty value matching any candidate (case-insensitive substring)."""
+        # Try exact (case-insensitive) first
+        for c in candidates:
+            if c in lower_map:
+                val = obj[lower_map[c]]
+                if val not in (None, "", 0):
+                    return val
+        # Try substring match
+        for c in candidates:
+            for lk, orig_k in lower_map.items():
+                if c in lk:
+                    val = obj[orig_k]
+                    if val not in (None, "", 0):
+                        return val
+        return ""
+
+    title = (
+        _get("title", "name")
+        or f"{_get('make', 'manufacturer')} {_get('model')}".strip()
+    )
+    price = _get("price", "retailprice", "price_retail")
+    mileage = _get("mileage", "odometer", "mileage_mil")
+    year = _get("year", "registration", "initial_registration", "modelyear")
+    url = _get("url", "link", "detailurl", "detail_url")
+
+    # Format price with £ if it's a bare number
+    price_str = str(price)
+    if price_str and price_str.replace(",", "").replace(".", "").isdigit():
+        try:
+            price_str = f"£{int(float(price_str)):,}"
+        except (ValueError, OverflowError):
+            pass
+
+    # Format mileage with "miles" suffix if bare number
+    mileage_str = str(mileage)
+    if mileage_str and mileage_str.replace(",", "").isdigit():
+        try:
+            mileage_str = f"{int(mileage_str):,} miles"
+        except (ValueError, OverflowError):
+            pass
+
+    # Extract year (first 4 digits) from registration date strings
+    year_str = str(year)
+    if year_str and not re.match(r'^\d{4}$', year_str):
+        year_match = re.search(r'(20[12]\d)', year_str)
+        if year_match:
+            year_str = year_match.group(1)
+
+    return {
+        "title": str(title),
+        "price": price_str,
+        "mileage": mileage_str,
+        "year": year_str,
+        "url": str(url),
+    }
 
 
 def _looks_like_vehicle(listing: dict) -> bool:
