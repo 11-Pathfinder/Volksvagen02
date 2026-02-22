@@ -16,33 +16,15 @@ on:
 jobs:
   scrape-and-email:
     runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright/python:v1.50.0-noble
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: "pip"
-
       - name: Install Python dependencies
-        run: pip install -r requirements.txt
-
-      - name: Cache Playwright browser
-        id: playwright-cache
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-chromium-${{ hashFiles('requirements.txt') }}
-
-      - name: Install Playwright browser
-        if: steps.playwright-cache.outputs.cache-hit != 'true'
-        run: playwright install chromium
-
-      - name: Install Playwright system dependencies
-        run: playwright install-deps chromium
+        run: pip install requests beautifulsoup4
 
       - name: Run scraper and send email
         env:
@@ -54,7 +36,7 @@ jobs:
         run: python main.py
 
       - name: Upload debug artifacts
-        if: always()
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: debug-${{ github.run_number }}

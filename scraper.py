@@ -101,16 +101,14 @@ def _scrape_via_browser() -> list[dict]:
             # Accept cookies if a consent banner appears
             _dismiss_cookie_banner(page)
 
-            # Wait for dynamic content to load
-            page.wait_for_timeout(2000)
+            # Brief pause for dynamic content after networkidle
+            page.wait_for_timeout(500)
 
             # Scroll to trigger lazy loading
-            for _ in range(3):
-                page.keyboard.press("End")
-                page.wait_for_timeout(1000)
-
-            # Wait a bit more for any final API calls
-            page.wait_for_timeout(1500)
+            page.keyboard.press("End")
+            page.wait_for_timeout(500)
+            page.keyboard.press("End")
+            page.wait_for_timeout(500)
 
             # === Extraction Phase ===
 
@@ -126,7 +124,6 @@ def _scrape_via_browser() -> list[dict]:
 
             if listings:
                 print(f"  Total from API interception: {len(listings)}")
-                _save_debug_artifacts(page)
                 browser.close()
                 return _deduplicate(listings)
 
@@ -135,7 +132,6 @@ def _scrape_via_browser() -> list[dict]:
             listings = _extract_from_page_scripts(page)
             if listings:
                 print(f"  Found {len(listings)} from embedded scripts.")
-                _save_debug_artifacts(page)
                 browser.close()
                 return listings
 
@@ -144,7 +140,6 @@ def _scrape_via_browser() -> list[dict]:
             listings = _extract_from_dom(page)
             if listings:
                 print(f"  Found {len(listings)} from DOM extraction.")
-                _save_debug_artifacts(page)
                 browser.close()
                 return listings
 
@@ -166,31 +161,21 @@ def _scrape_via_browser() -> list[dict]:
 
 def _dismiss_cookie_banner(page) -> None:
     """Try to dismiss cookie consent banners."""
+    # Most likely selectors first; short timeouts to avoid wasting time
     cookie_selectors = [
         "#onetrust-accept-btn-handler",
         "button:has-text('Accept All')",
         "button:has-text('Accept all')",
         "button:has-text('Accept All Cookies')",
-        "button:has-text('Allow all')",
-        "button:has-text('Allow All')",
-        "button:has-text('Agree')",
-        "button:has-text('agree')",
-        "button:has-text('OK')",
         "[data-testid='cookie-accept']",
-        ".cookie-accept",
-        "#accept-cookies",
-        "button[class*='consent']",
-        "button[class*='Consent']",
-        "button[class*='cookie']",
-        "button[class*='Cookie']",
     ]
     for selector in cookie_selectors:
         try:
             btn = page.locator(selector).first
-            if btn.is_visible(timeout=2000):
+            if btn.is_visible(timeout=500):
                 btn.click()
                 print(f"  Accepted cookies via: {selector}")
-                page.wait_for_timeout(2000)
+                page.wait_for_timeout(500)
                 return
         except Exception:
             continue
