@@ -33,7 +33,7 @@ jobs:
           SMTP_HOST: ${{ secrets.SMTP_HOST || 'smtp.gmail.com' }}
           SMTP_PORT: ${{ secrets.SMTP_PORT || '587' }}
           EMAIL_RECIPIENT: "mohit.sanwal@gmail.com"
-        run: python main.py
+        run: xvfb-run python main.py
 
       - name: Upload debug artifacts
         if: always()

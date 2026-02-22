@@ -35,8 +35,36 @@ OUTPUT_FILE = "listings.json"
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/125.0.0.0 Safari/537.36"
+    "Chrome/131.0.0.0 Safari/537.36"
 )
+
+# JavaScript injected before every page to hide headless/automation signals.
+STEALTH_JS = """
+// Remove navigator.webdriver flag
+Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+
+// Spoof Chrome runtime
+window.chrome = { runtime: {}, loadTimes: function(){}, csi: function(){} };
+
+// Fake permissions API
+const origQuery = window.navigator.permissions?.query?.bind(window.navigator.permissions);
+if (origQuery) {
+  window.navigator.permissions.query = (params) =>
+    params.name === 'notifications'
+      ? Promise.resolve({ state: Notification.permission })
+      : origQuery(params);
+}
+
+// Spoof plugins (headless has 0)
+Object.defineProperty(navigator, 'plugins', {
+  get: () => [1, 2, 3, 4, 5],
+});
+
+// Spoof languages
+Object.defineProperty(navigator, 'languages', {
+  get: () => ['en-GB', 'en-US', 'en'],
+});
+"""
 
 
 def scrape_listings() -> list[dict]:
@@ -84,38 +112,56 @@ def _scrape_via_browser() -> list[dict]:
 
     try:
         with sync_playwright() as p:
+            # Use non-headless if DISPLAY is set (xvfb in CI), else new headless
+            use_headless = os.environ.get("DISPLAY") is None
+            print(f"  Headless mode: {use_headless}")
             browser = p.chromium.launch(
-                headless=True,
+                headless=use_headless,
                 args=[
                     "--no-sandbox",
                     "--disable-setuid-sandbox",
                     "--disable-dev-shm-usage",
+                    "--disable-blink-features=AutomationControlled",
                 ],
             )
             context = browser.new_context(
                 user_agent=USER_AGENT,
                 viewport={"width": 1920, "height": 1080},
                 locale="en-GB",
+                timezone_id="Europe/London",
+                geolocation={"latitude": 51.4214, "longitude": -0.2064},
+                permissions=["geolocation"],
             )
+            # Inject stealth scripts before any page loads
+            context.add_init_script(STEALTH_JS)
             page = context.new_page()
 
             # Intercept network responses to capture API data
             page.on("response", handle_response)
 
-            print(f"  Navigating to: {SEARCH_URL[:100]}...")
+            # Navigate to the home page first, then the search — mimics real user
+            print("  Visiting home page first...")
+            page.goto(
+                "https://usedcars.volkswagen.co.uk/en/home",
+                wait_until="domcontentloaded",
+                timeout=30000,
+            )
+            _dismiss_cookie_banner(page)
+            page.wait_for_timeout(2000)
+
+            print(f"  Navigating to search: {SEARCH_URL[:80]}...")
             page.goto(SEARCH_URL, wait_until="networkidle", timeout=60000)
 
-            # Accept cookies if a consent banner appears
+            # Accept cookies again if banner reappears
             _dismiss_cookie_banner(page)
 
-            # Brief pause for dynamic content after networkidle
-            page.wait_for_timeout(500)
+            # Wait for dynamic content
+            page.wait_for_timeout(3000)
 
-            # Scroll to trigger lazy loading
-            page.keyboard.press("End")
-            page.wait_for_timeout(500)
-            page.keyboard.press("End")
-            page.wait_for_timeout(500)
+            # Scroll slowly like a human to trigger lazy loading
+            for _ in range(3):
+                page.mouse.wheel(0, 600)
+                page.wait_for_timeout(1000)
 
             # === Extraction Phase ===
 
@@ -134,6 +180,7 @@ def _scrape_via_browser() -> list[dict]:
 
             if listings:
                 print(f"  Total from API interception: {len(listings)}")
+                _save_debug_artifacts(page)
                 browser.close()
                 return _deduplicate(listings)
 
@@ -142,6 +189,7 @@ def _scrape_via_browser() -> list[dict]:
             listings = _extract_from_page_scripts(page)
             if listings:
                 print(f"  Found {len(listings)} from embedded scripts.")
+                _save_debug_artifacts(page)
                 browser.close()
                 return listings
 
@@ -150,6 +198,7 @@ def _scrape_via_browser() -> list[dict]:
             listings = _extract_from_dom(page)
             if listings:
                 print(f"  Found {len(listings)} from DOM extraction.")
+                _save_debug_artifacts(page)
                 browser.close()
                 return listings
 
@@ -157,7 +206,7 @@ def _scrape_via_browser() -> list[dict]:
             print("  Trying text-based extraction...")
             listings = _extract_from_page_text(page)
 
-            # Save debug artifacts for CI inspection
+            # Always save debug artifacts for CI inspection
             _save_debug_artifacts(page)
             _log_page_diagnostics(page, captured_api_responses)
 
