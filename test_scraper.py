@@ -12,6 +12,7 @@ import tempfile
 
 from scraper import (
     _find_vehicles_in_obj,
+    _extract_vehicle_fields,
     _normalize_ld_json,
     _parse_api_response,
     _parse_listings_from_text,
@@ -61,6 +62,9 @@ def test_find_vehicles_in_obj():
     assert len(found) == 2, f"Expected 2 vehicles, got {len(found)}"
     assert found[0]["title"] == "VW ID.4"
     assert found[1]["title"] == "VW ID.5"
+    assert found[0]["price"] == "£25,000", f"Expected '£25,000', got '{found[0]['price']}'"
+    assert found[0]["mileage"] == "5,000 miles", f"Expected '5,000 miles', got '{found[0]['mileage']}'"
+    assert found[0]["year"] == "2024", f"Expected '2024', got '{found[0]['year']}'"
     print("  PASS test_find_vehicles_in_obj")
 
 
@@ -126,14 +130,15 @@ def test_parse_api_response_results_key():
     listings = _parse_api_response(api_data)
     assert len(listings) == 2
     assert listings[0]["title"] == "VW ID.4"
-    assert listings[0]["price"] == "25000"
+    assert listings[0]["price"] == "£25,000", f"Expected '£25,000', got '{listings[0]['price']}'"
+    assert listings[0]["mileage"] == "8,000 miles", f"Expected '8,000 miles', got '{listings[0]['mileage']}'"
     print("  PASS test_parse_api_response_results_key")
 
 
 def test_parse_api_response_list():
     """Test API response parsing when response is a list."""
     api_data = [
-        {"title": "VW ID.4", "price": 25000},
+        {"title": "VW ID.4", "price": 25000, "mileage": 5000},
     ]
     listings = _parse_api_response(api_data)
     assert len(listings) == 1
@@ -144,7 +149,7 @@ def test_parse_api_response_make_model():
     """Test API response with make/model instead of title."""
     api_data = {
         "vehicles": [
-            {"make": "Volkswagen", "model": "ID.4", "price": 25000},
+            {"make": "Volkswagen", "model": "ID.4", "price": 25000, "mileage": 5000},
         ]
     }
     listings = _parse_api_response(api_data)
@@ -159,6 +164,70 @@ def test_parse_api_response_empty():
     assert _parse_api_response({"results": []}) == []
     assert _parse_api_response([]) == []
     print("  PASS test_parse_api_response_empty")
+
+
+def test_find_vehicles_vw_field_names():
+    """Test that VW-specific field names (PRICE_RETAIL_CUR_FLT, etc.) are extracted."""
+    nested = {
+        "data": {
+            "results": [
+                {
+                    "TITLE": "Volkswagen ID.4 Pure Performance 52kWh",
+                    "MANUFACTURER_LST": "VOLKSWAGEN",
+                    "MODEL_TYPE_LST": "VOLKSWAGEN_ID_4",
+                    "PRICE_RETAIL_CUR_FLT": 25990,
+                    "MILEAGE_MIL_INT": 8500,
+                    "INITIAL_REGISTRATION_DTE": "2024-03-15",
+                    "VIN": "WVWZZZ12345678901",
+                    "FUEL_TYPE_LST": "ELECTRIC",
+                },
+            ]
+        }
+    }
+    found = _find_vehicles_in_obj(nested)
+    assert len(found) == 1, f"Expected 1 vehicle, got {len(found)}"
+    assert "ID.4" in found[0]["title"], f"Title missing ID.4: {found[0]['title']}"
+    assert "25,990" in found[0]["price"], f"Price not extracted: {found[0]['price']}"
+    assert "8,500" in found[0]["mileage"], f"Mileage not extracted: {found[0]['mileage']}"
+    assert "2024" in found[0]["year"], f"Year not extracted: {found[0]['year']}"
+    print("  PASS test_find_vehicles_vw_field_names")
+
+
+def test_extract_vehicle_fields_formatting():
+    """Test that bare numeric prices and mileages get formatted nicely."""
+    obj = {"title": "VW ID.5", "price": 29450, "mileage": 3200, "year": 2024}
+    result = _extract_vehicle_fields(obj)
+    assert result["price"] == "£29,450", f"Expected '£29,450', got '{result['price']}'"
+    assert result["mileage"] == "3,200 miles", f"Expected '3,200 miles', got '{result['mileage']}'"
+    assert result["year"] == "2024"
+    print("  PASS test_extract_vehicle_fields_formatting")
+
+
+def test_parse_api_response_vw_specific():
+    """Test _parse_api_response with VW-specific wrapper and field names."""
+    api_data = {
+        "results": [
+            {
+                "TITLE": "Volkswagen ID.4 Pure Performance",
+                "PRICE_RETAIL_CUR_FLT": 25990,
+                "MILEAGE_MIL_INT": 8500,
+                "INITIAL_REGISTRATION_DTE": "2024-06-01",
+            },
+            {
+                "TITLE": "Volkswagen ID.5 GTX",
+                "PRICE_RETAIL_CUR_FLT": 29450,
+                "MILEAGE_MIL_INT": 3200,
+                "INITIAL_REGISTRATION_DTE": "2024-01-15",
+            },
+        ]
+    }
+    listings = _parse_api_response(api_data)
+    assert len(listings) == 2, f"Expected 2, got {len(listings)}"
+    assert listings[0]["title"] == "Volkswagen ID.4 Pure Performance"
+    assert "25,990" in listings[0]["price"]
+    assert "8,500" in listings[0]["mileage"]
+    assert "2024" in listings[0]["year"]
+    print("  PASS test_parse_api_response_vw_specific")
 
 
 # ── Text parsing tests ────────────────────────────────────────────────────
@@ -403,12 +472,15 @@ def run_all_tests():
         test_find_vehicles_in_obj,
         test_find_vehicles_empty,
         test_find_vehicles_depth_limit,
+        test_find_vehicles_vw_field_names,
+        test_extract_vehicle_fields_formatting,
         test_normalize_ld_json,
         test_normalize_ld_json_scalar_mileage,
         test_parse_api_response_results_key,
         test_parse_api_response_list,
         test_parse_api_response_make_model,
         test_parse_api_response_empty,
+        test_parse_api_response_vw_specific,
         test_parse_listings_from_text,
         test_parse_listings_from_text_empty,
         test_find_vehicles_rejects_weak_matches,
