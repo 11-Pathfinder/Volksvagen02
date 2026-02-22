@@ -2,10 +2,9 @@
 Main entry point: runs the scraper and sends results via email.
 """
 
-from scraper import scrape_listings, save_listings
-from email_sender import load_listings, build_html_email, build_plain_text, send_email
-
 import os
+import sys
+import traceback
 from datetime import datetime, timezone
 
 
@@ -13,7 +12,23 @@ def main():
     print("=" * 50)
     print("VW Used Cars Scraper - Starting run")
     print(f"Time: {datetime.now(timezone.utc).isoformat()}")
+    print(f"Python: {sys.version}")
     print("=" * 50)
+
+    # Lazy imports so we get clear error messages if a dependency is missing
+    try:
+        from scraper import scrape_listings, save_listings
+    except ImportError as e:
+        print(f"ERROR importing scraper: {e}")
+        traceback.print_exc()
+        return
+
+    try:
+        from email_sender import load_listings, build_html_email, build_plain_text, send_email
+    except ImportError as e:
+        print(f"ERROR importing email_sender: {e}")
+        traceback.print_exc()
+        return
 
     # Step 1: Scrape listings
     print("\n[1/2] Scraping VW used car listings...")
@@ -52,4 +67,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception:
+        traceback.print_exc()
+        # Don't exit(1) — let the artifacts upload step run

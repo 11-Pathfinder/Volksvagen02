@@ -14,7 +14,10 @@ from urllib.parse import urlencode
 import requests
 from bs4 import BeautifulSoup
 
-from playwright.sync_api import sync_playwright
+try:
+    from playwright.sync_api import sync_playwright
+except ImportError:
+    sync_playwright = None
 
 
 SEARCH_URL = (
@@ -58,6 +61,10 @@ def scrape_listings() -> list[dict]:
 
 def _scrape_via_browser() -> list[dict]:
     """Scrape using Playwright headless Chromium with network interception."""
+    if sync_playwright is None:
+        print("  Playwright not installed — skipping browser strategy.")
+        return []
+
     listings = []
     captured_api_responses = []
 
