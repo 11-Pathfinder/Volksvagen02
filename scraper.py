@@ -155,13 +155,16 @@ def _scrape_via_browser() -> list[dict]:
             # Accept cookies again if banner reappears
             _dismiss_cookie_banner(page)
 
-            # Wait for dynamic content
-            page.wait_for_timeout(3000)
+            # Wait for dynamic content to fully load
+            page.wait_for_timeout(5000)
 
             # Scroll slowly like a human to trigger lazy loading
-            for _ in range(3):
+            for _ in range(5):
                 page.mouse.wheel(0, 600)
-                page.wait_for_timeout(1000)
+                page.wait_for_timeout(1500)
+
+            # Extra wait for any final API calls after scrolling
+            page.wait_for_timeout(2000)
 
             # === Extraction Phase ===
 
@@ -220,21 +223,28 @@ def _scrape_via_browser() -> list[dict]:
 
 def _dismiss_cookie_banner(page) -> None:
     """Try to dismiss cookie consent banners."""
-    # Most likely selectors first; short timeouts to avoid wasting time
     cookie_selectors = [
         "#onetrust-accept-btn-handler",
         "button:has-text('Accept All')",
         "button:has-text('Accept all')",
         "button:has-text('Accept All Cookies')",
+        "button:has-text('Allow all')",
+        "button:has-text('Allow All')",
+        "button:has-text('Agree')",
+        "button:has-text('OK')",
         "[data-testid='cookie-accept']",
+        ".cookie-accept",
+        "#accept-cookies",
+        "button[class*='consent']",
+        "button[class*='cookie']",
     ]
     for selector in cookie_selectors:
         try:
             btn = page.locator(selector).first
-            if btn.is_visible(timeout=500):
+            if btn.is_visible(timeout=2000):
                 btn.click()
                 print(f"  Accepted cookies via: {selector}")
-                page.wait_for_timeout(500)
+                page.wait_for_timeout(2000)
                 return
         except Exception:
             continue
