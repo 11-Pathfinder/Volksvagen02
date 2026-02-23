@@ -77,6 +77,15 @@ def scrape_listings() -> list[dict]:
         print("[Strategy 2] Attempting requests + HTML parsing...")
         listings = _scrape_via_requests()
 
+    # Log raw extraction results before filtering
+    if listings:
+        print(f"\n  === RAW EXTRACTION RESULTS ({len(listings)} listings) ===")
+        for i, listing in enumerate(listings[:3]):
+            print(f"  Listing {i+1}: {json.dumps(listing, indent=2)}")
+        if len(listings) > 3:
+            print(f"  ... and {len(listings) - 3} more")
+        print(f"  === END RAW RESULTS ===\n")
+
     # Post-extraction: filter out non-vehicle entries
     before = len(listings)
     listings = _filter_valid_listings(listings)
@@ -173,12 +182,17 @@ def _scrape_via_browser() -> list[dict]:
             for resp_data in captured_api_responses:
                 api_url = resp_data["url"]
                 data = resp_data["data"]
+                # Log the first few API responses in detail for debugging
+                _log_api_response(api_url, data)
                 # Try structured parsing first (handles VW-specific field names)
                 vehicles = _parse_api_response(data)
                 if not vehicles:
                     vehicles = _find_vehicles_in_obj(data)
                 if vehicles:
                     print(f"  Found {len(vehicles)} vehicles from API: {api_url[:120]}")
+                    # Log the first extracted vehicle for debugging
+                    if vehicles:
+                        print(f"  Sample extracted vehicle: {json.dumps(vehicles[0], indent=2)}")
                     listings.extend(vehicles)
 
             if listings:
@@ -211,6 +225,7 @@ def _scrape_via_browser() -> list[dict]:
 
             # Always save debug artifacts for CI inspection
             _save_debug_artifacts(page)
+            _save_api_debug(captured_api_responses)
             _log_page_diagnostics(page, captured_api_responses)
 
             print(f"  Extracted {len(listings)} listings total.")
@@ -291,6 +306,14 @@ def _extract_from_dom(page) -> list[dict]:
             count = found.count()
             if count > 0:
                 print(f"  Found {count} elements with selector: {selector}")
+                # Log first card's HTML and text for debugging
+                try:
+                    first_html = found.nth(0).evaluate("el => el.outerHTML")
+                    print(f"  First card HTML (truncated): {first_html[:1000]}")
+                    first_text = found.nth(0).inner_text()
+                    print(f"  First card text: {first_text[:500]}")
+                except Exception:
+                    pass
                 for i in range(min(count, 50)):
                     card = found.nth(i)
                     listing = _extract_card_data(card)
@@ -552,6 +575,51 @@ def _parse_listings_from_text(text: str) -> list[dict]:
                 listings.append(listing)
 
     return listings
+
+
+def _save_api_debug(api_responses: list) -> None:
+    """Save all captured API responses to a debug file for inspection."""
+    try:
+        debug_data = []
+        for resp in api_responses:
+            debug_data.append({
+                "url": resp["url"],
+                "data_preview": json.dumps(resp["data"], indent=2, ensure_ascii=False)[:5000],
+            })
+        with open("debug_api_responses.json", "w", encoding="utf-8") as f:
+            json.dump(debug_data, f, indent=2, ensure_ascii=False)
+        print(f"  Saved {len(debug_data)} API responses to debug_api_responses.json")
+    except Exception as e:
+        print(f"  Failed to save API debug: {e}")
+
+
+def _log_api_response(url: str, data) -> None:
+    """Log API response structure for debugging."""
+    print(f"\n  --- API Response: {url[:150]} ---")
+    if isinstance(data, dict):
+        print(f"  Top-level keys: {list(data.keys())}")
+        for key, val in data.items():
+            if isinstance(val, list) and len(val) > 0:
+                print(f"  '{key}': list of {len(val)} items")
+                if isinstance(val[0], dict):
+                    print(f"    First item keys: {list(val[0].keys())}")
+                    # Print first item's values (truncated)
+                    for k, v in val[0].items():
+                        v_str = str(v)[:100]
+                        print(f"      {k}: {v_str}")
+            elif isinstance(val, dict):
+                print(f"  '{key}': dict with keys {list(val.keys())[:15]}")
+            else:
+                v_str = str(val)[:100]
+                print(f"  '{key}': {v_str}")
+    elif isinstance(data, list):
+        print(f"  Top-level list of {len(data)} items")
+        if data and isinstance(data[0], dict):
+            print(f"    First item keys: {list(data[0].keys())}")
+            for k, v in data[0].items():
+                v_str = str(v)[:100]
+                print(f"      {k}: {v_str}")
+    print(f"  --- End API Response ---\n")
 
 
 def _save_debug_artifacts(page) -> None:
