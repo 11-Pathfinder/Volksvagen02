@@ -212,16 +212,32 @@ def _scrape_via_browser() -> list[dict]:
 
             # Step 3: Try DOM-based extraction with many selectors
             print("  Trying DOM-based extraction...")
-            listings = _extract_from_dom(page)
-            if listings:
-                print(f"  Found {len(listings)} from DOM extraction.")
-                _save_debug_artifacts(page)
-                browser.close()
-                return listings
+            dom_listings = _extract_from_dom(page)
+            if dom_listings:
+                print(f"  Found {len(dom_listings)} from DOM extraction.")
+                if _has_price_data(dom_listings):
+                    _save_debug_artifacts(page)
+                    browser.close()
+                    return dom_listings
+                print("  DOM results lack price data, trying text extraction...")
 
-            # Step 4: Last resort - extract from visible text
+            # Step 4: Extract from visible text (proximity-based parsing)
             print("  Trying text-based extraction...")
-            listings = _extract_from_page_text(page)
+            text_listings = _extract_from_page_text(page)
+            if text_listings:
+                print(f"  Found {len(text_listings)} from text extraction.")
+                if _has_price_data(text_listings):
+                    _save_debug_artifacts(page)
+                    browser.close()
+                    return text_listings
+
+            # Step 5: Use whichever results are richer
+            if text_listings and dom_listings:
+                dom_prices = sum(1 for l in dom_listings if l.get("price"))
+                text_prices = sum(1 for l in text_listings if l.get("price"))
+                listings = text_listings if text_prices > dom_prices else dom_listings
+            else:
+                listings = text_listings or dom_listings or []
 
             # Always save debug artifacts for CI inspection
             _save_debug_artifacts(page)
@@ -320,6 +336,12 @@ def _extract_from_dom(page) -> list[dict]:
                     if listing and (listing.get("title") or listing.get("raw_text")):
                         listings.append(listing)
                 if listings:
+                    # If no listing has price, cards may be too small — try parents
+                    if not any(l.get("price") for l in listings):
+                        print("  Cards lack price data, trying parent elements...")
+                        parent_listings = _try_parent_extraction(found, count)
+                        if parent_listings and any(l.get("price") for l in parent_listings):
+                            return parent_listings
                     return listings
         except Exception:
             continue
@@ -380,16 +402,41 @@ def _extract_card_data(card) -> dict:
         except Exception:
             continue
 
-    # Link
+    # Link — check if card itself is an <a>, then check descendants, then parent
     try:
-        link = card.locator("a[href]").first
-        href = link.get_attribute("href")
-        if href:
-            if href.startswith("/"):
-                href = "https://usedcars.volkswagen.co.uk" + href
-            data["url"] = href
+        card_href = card.evaluate(
+            "el => el.tagName === 'A' ? (el.getAttribute('href') || '') : ''"
+        )
+        if card_href:
+            if card_href.startswith("/"):
+                card_href = "https://usedcars.volkswagen.co.uk" + card_href
+            data["url"] = card_href
+        else:
+            link = card.locator("a[href]").first
+            href = link.get_attribute("href")
+            if href:
+                if href.startswith("/"):
+                    href = "https://usedcars.volkswagen.co.uk" + href
+                data["url"] = href
     except Exception:
         pass
+    # If still no URL, check if card is inside a link (parent <a>)
+    if not data.get("url"):
+        try:
+            parent_href = card.evaluate("""el => {
+                let p = el.parentElement;
+                for (let i = 0; i < 5 && p; i++) {
+                    if (p.tagName === 'A' && p.href) return p.getAttribute('href');
+                    p = p.parentElement;
+                }
+                return '';
+            }""")
+            if parent_href:
+                if parent_href.startswith("/"):
+                    parent_href = "https://usedcars.volkswagen.co.uk" + parent_href
+                data["url"] = parent_href
+        except Exception:
+            pass
 
     # Fallback: parse missing fields from the card's visible text
     try:
@@ -533,10 +580,14 @@ def _extract_from_page_text(page) -> list[dict]:
         except Exception:
             continue
 
-    # Ultimate fallback: parse the entire body text for vehicle-like blocks
+    # Fallback: parse the entire body text for vehicle-like blocks
     try:
         body_text = page.inner_text("body")
-        listings = _parse_listings_from_text(body_text)
+        # Try proximity-based parsing first (handles varied layouts)
+        listings = _parse_listings_from_text_proximity(body_text)
+        if not listings:
+            # Fall back to block-based parsing
+            listings = _parse_listings_from_text(body_text)
     except Exception:
         pass
 
@@ -575,6 +626,125 @@ def _parse_listings_from_text(text: str) -> list[dict]:
                 listings.append(listing)
 
     return listings
+
+
+def _parse_single_vehicle_text(text: str) -> dict:
+    """Parse a single vehicle's details from a text block."""
+    listing = {}
+
+    title_match = re.search(
+        r'((?:Volkswagen|VW)\s+ID[.\s]?[345]\S*(?:\s+\S+){0,8})',
+        text, re.IGNORECASE,
+    )
+    if title_match:
+        listing["title"] = title_match.group(1).strip()
+
+    price_match = re.search(r'£[\d,]+', text)
+    if price_match:
+        listing["price"] = price_match.group()
+
+    year_match = re.search(r'\b(202[0-9])\b', text)
+    if year_match:
+        listing["year"] = year_match.group(1)
+
+    mile_match = re.search(r'([\d,]+)\s*(?:miles|mi\b)', text, re.IGNORECASE)
+    if mile_match:
+        listing["mileage"] = mile_match.group(1) + " miles"
+
+    url_match = re.search(r'(/en/vehicle_search/volkswagen/[^\s"\'<>]+)', text)
+    if url_match:
+        listing["url"] = "https://usedcars.volkswagen.co.uk" + url_match.group(1)
+
+    listing["raw_text"] = text[:500]
+    return listing
+
+
+def _try_parent_extraction(found, count: int) -> list[dict]:
+    """Walk up DOM tree from matched elements to find richer card containers."""
+    for level in range(1, 6):
+        parent_listings = []
+        seen_parents = set()
+        for i in range(min(count, 50)):
+            try:
+                parent_path = ".parentElement" * level
+                parent_data = found.nth(i).evaluate(f"""el => {{
+                    const parent = el{parent_path};
+                    if (!parent) return null;
+                    return {{
+                        text: parent.innerText || '',
+                        tag: parent.tagName,
+                    }};
+                }}""")
+                if not parent_data:
+                    continue
+                text = parent_data["text"]
+                if not text or len(text) < 20:
+                    continue
+                # Skip if we've already processed this parent (siblings share parents)
+                text_key = text[:200]
+                if text_key in seen_parents:
+                    continue
+                seen_parents.add(text_key)
+
+                listing = _parse_single_vehicle_text(text)
+                if listing and (listing.get("title") or listing.get("raw_text")):
+                    parent_listings.append(listing)
+            except Exception:
+                continue
+        if parent_listings and any(l.get("price") for l in parent_listings):
+            print(f"  Found {len(parent_listings)} listings at parent level {level}")
+            # Log a sample for debugging
+            sample = next((l for l in parent_listings if l.get("price")), parent_listings[0])
+            print(f"  Sample parent listing: {json.dumps(sample, indent=2)}")
+            return parent_listings
+    return []
+
+
+def _parse_listings_from_text_proximity(text: str) -> list[dict]:
+    """Parse vehicle listings using proximity of model names to prices/details."""
+    listings = []
+
+    model_pattern = r'(?:Volkswagen|VW)\s+ID[.\s]?[345]\S*'
+    model_matches = list(re.finditer(model_pattern, text, re.IGNORECASE))
+
+    if not model_matches:
+        return []
+
+    for i, match in enumerate(model_matches):
+        # Window starts at this model name (not before, to avoid overlap)
+        start = match.start()
+        if i + 1 < len(model_matches):
+            end = model_matches[i + 1].start()
+        else:
+            end = min(start + 1000, len(text))
+
+        window = text[start:end]
+        listing = {"title": match.group().strip()}
+
+        price_match = re.search(r'£[\d,]+', window)
+        if price_match:
+            listing["price"] = price_match.group()
+
+        year_match = re.search(r'\b(202[0-9])\b', window)
+        if year_match:
+            listing["year"] = year_match.group(1)
+
+        mile_match = re.search(r'([\d,]+)\s*(?:miles|mi\b)', window, re.IGNORECASE)
+        if mile_match:
+            listing["mileage"] = mile_match.group(1) + " miles"
+
+        listing["raw_text"] = window[:500]
+        listings.append(listing)
+
+    return listings
+
+
+def _has_price_data(listings: list[dict]) -> bool:
+    """Check if at least some listings have price information."""
+    if not listings:
+        return False
+    with_price = sum(1 for l in listings if l.get("price"))
+    return with_price >= max(1, len(listings) * 0.3)
 
 
 def _save_api_debug(api_responses: list) -> None:

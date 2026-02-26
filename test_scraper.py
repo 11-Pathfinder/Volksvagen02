@@ -16,6 +16,9 @@ from scraper import (
     _normalize_ld_json,
     _parse_api_response,
     _parse_listings_from_text,
+    _parse_listings_from_text_proximity,
+    _parse_single_vehicle_text,
+    _has_price_data,
     _filter_valid_listings,
     _deduplicate,
     save_listings,
@@ -354,6 +357,70 @@ def test_deduplicate():
     print("  PASS test_deduplicate")
 
 
+def test_parse_single_vehicle_text():
+    """Test parsing vehicle details from a text block."""
+    text = """Volkswagen ID.4 Pure Performance 52kWh 170PS
+£25,990
+8,500 miles
+2024
+/en/vehicle_search/volkswagen/id-4/abc123/offer"""
+    result = _parse_single_vehicle_text(text)
+    assert "ID.4" in result.get("title", ""), f"Title: {result.get('title')}"
+    assert result.get("price") == "£25,990", f"Price: {result.get('price')}"
+    assert "8,500" in result.get("mileage", ""), f"Mileage: {result.get('mileage')}"
+    assert result.get("year") == "2024", f"Year: {result.get('year')}"
+    assert "vehicle_search" in result.get("url", ""), f"URL: {result.get('url')}"
+    print("  PASS test_parse_single_vehicle_text")
+
+
+def test_parse_single_vehicle_text_minimal():
+    """Test parsing with only title (no details)."""
+    result = _parse_single_vehicle_text("Volkswagen ID.4")
+    assert "ID.4" in result.get("title", "")
+    assert not result.get("price")
+    assert not result.get("mileage")
+    print("  PASS test_parse_single_vehicle_text_minimal")
+
+
+def test_parse_listings_from_text_proximity():
+    """Test proximity-based text parsing finds vehicles even without double-newline separation."""
+    text = (
+        "Volkswagen ID.4 Pure Performance 52kWh 170PS "
+        "£25,990 8,500 miles 2024 "
+        "Volkswagen ID.5 GTX 77kWh 299PS AWD "
+        "£29,450 3,200 miles 2024"
+    )
+    listings = _parse_listings_from_text_proximity(text)
+    assert len(listings) == 2, f"Expected 2, got {len(listings)}"
+    assert "ID.4" in listings[0]["title"]
+    assert listings[0]["price"] == "£25,990"
+    assert "ID.5" in listings[1]["title"]
+    assert listings[1]["price"] == "£29,450"
+    print("  PASS test_parse_listings_from_text_proximity")
+
+
+def test_parse_listings_from_text_proximity_empty():
+    """Test proximity parser with no vehicles."""
+    listings = _parse_listings_from_text_proximity("No cars here.")
+    assert len(listings) == 0
+    print("  PASS test_parse_listings_from_text_proximity_empty")
+
+
+def test_has_price_data():
+    """Test the price quality gate."""
+    # No listings
+    assert not _has_price_data([])
+    # All have prices
+    assert _has_price_data([{"price": "£25,000"}, {"price": "£29,000"}])
+    # None have prices
+    assert not _has_price_data([{"title": "VW ID.4"}, {"title": "VW ID.5"}])
+    # Some have prices (50% > 30% threshold)
+    assert _has_price_data([{"price": "£25,000"}, {"title": "VW ID.5"}])
+    # One listing with price
+    assert _has_price_data([{"price": "£25,000"}])
+    print("  PASS test_has_price_data")
+
+
 # ── Save/Load tests ────────────────────────────────────────────────────────
 
 def test_save_and_load_listings():
@@ -488,6 +555,11 @@ def run_all_tests():
         test_filter_rejects_ui_elements,
         test_filter_requires_positive_car_signal,
         test_deduplicate,
+        test_parse_single_vehicle_text,
+        test_parse_single_vehicle_text_minimal,
+        test_parse_listings_from_text_proximity,
+        test_parse_listings_from_text_proximity_empty,
+        test_has_price_data,
         test_save_and_load_listings,
         test_build_html_email,
         test_build_html_email_empty,
