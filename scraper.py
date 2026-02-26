@@ -210,7 +210,18 @@ def _scrape_via_browser() -> list[dict]:
                 browser.close()
                 return listings
 
-            # Step 3: Try DOM-based extraction with many selectors
+            # Step 3: Smart vehicle-link extraction (walks from <a> tags to card containers)
+            print("  Trying vehicle-link extraction...")
+            link_listings = _extract_from_vehicle_links(page)
+            if link_listings:
+                print(f"  Found {len(link_listings)} from vehicle-link extraction.")
+                if _has_price_data(link_listings):
+                    _save_debug_artifacts(page)
+                    browser.close()
+                    return link_listings
+                print("  Vehicle-link results lack valid prices, continuing...")
+
+            # Step 4: Try DOM-based extraction with many selectors
             print("  Trying DOM-based extraction...")
             dom_listings = _extract_from_dom(page)
             if dom_listings:
@@ -219,9 +230,9 @@ def _scrape_via_browser() -> list[dict]:
                     _save_debug_artifacts(page)
                     browser.close()
                     return dom_listings
-                print("  DOM results lack price data, trying text extraction...")
+                print("  DOM results lack valid prices, trying text extraction...")
 
-            # Step 4: Extract from visible text (proximity-based parsing)
+            # Step 5: Extract from visible text (proximity-based parsing)
             print("  Trying text-based extraction...")
             text_listings = _extract_from_page_text(page)
             if text_listings:
@@ -231,13 +242,19 @@ def _scrape_via_browser() -> list[dict]:
                     browser.close()
                     return text_listings
 
-            # Step 5: Use whichever results are richer
-            if text_listings and dom_listings:
-                dom_prices = sum(1 for l in dom_listings if l.get("price"))
-                text_prices = sum(1 for l in text_listings if l.get("price"))
-                listings = text_listings if text_prices > dom_prices else dom_listings
-            else:
-                listings = text_listings or dom_listings or []
+            # Step 6: Use whichever results are richer
+            all_candidates = [
+                ("vehicle-link", link_listings or []),
+                ("text", text_listings or []),
+                ("dom", dom_listings or []),
+            ]
+            # Pick the candidate set with the most valid prices
+            best_name, listings = max(
+                all_candidates,
+                key=lambda x: sum(1 for l in x[1] if l.get("price")),
+            )
+            if listings:
+                print(f"  Using best available: {best_name} ({len(listings)} listings)")
 
             # Always save debug artifacts for CI inspection
             _save_debug_artifacts(page)
@@ -628,6 +645,82 @@ def _parse_listings_from_text(text: str) -> list[dict]:
     return listings
 
 
+def _extract_from_vehicle_links(page) -> list[dict]:
+    """Extract vehicle data by finding vehicle links and walking up to card containers."""
+    try:
+        results = page.evaluate("""() => {
+            const selectors = [
+                'a[href*="/vehicle_search/volkswagen/id-"]',
+                'a[href*="/vehicle_search/volkswagen/id."]',
+            ];
+            let links = [];
+            for (const sel of selectors) {
+                links.push(...document.querySelectorAll(sel));
+            }
+            const vehicles = new Map();
+
+            for (const link of links) {
+                const href = link.getAttribute('href') || '';
+                const urlPath = href.split('?')[0];
+                if (vehicles.has(urlPath)) continue;
+
+                // Walk up the DOM to find a card container with a real vehicle price
+                let el = link;
+                for (let i = 0; i < 10; i++) {
+                    el = el.parentElement;
+                    if (!el || el.tagName === 'BODY') break;
+                    const text = el.innerText || '';
+                    if (text.length < 30) continue;
+                    if (text.length > 5000) break;
+
+                    // Look for £ prices in the car price range (£5,000+)
+                    const prices = text.match(/\\u00a3[\\d,]+/g) || [];
+                    const hasCarPrice = prices.some(p => {
+                        const num = parseInt(p.replace(/[\\u00a3,]/g, ''));
+                        return num >= 5000 && num <= 100000;
+                    });
+
+                    if (hasCarPrice) {
+                        vehicles.set(urlPath, {
+                            url: href.startsWith('/')
+                                ? 'https://usedcars.volkswagen.co.uk' + href
+                                : href,
+                            text: text.substring(0, 1500),
+                            level: i + 1,
+                        });
+                        break;
+                    }
+                }
+            }
+
+            return [...vehicles.values()];
+        }""")
+
+        if not results:
+            return []
+
+        print(f"  Found {len(results)} vehicle card containers via link-walking")
+        if results:
+            first = results[0]
+            print(f"  Sample at DOM level {first.get('level')}: {first.get('text', '')[:300]}")
+
+        listings = []
+        for item in results:
+            listing = _parse_single_vehicle_text(item["text"])
+            url = item.get("url", "")
+            if url:
+                listing["url"] = url.split("?")[0]
+                if listing["url"].startswith("/"):
+                    listing["url"] = "https://usedcars.volkswagen.co.uk" + listing["url"]
+            if listing.get("title") or listing.get("price"):
+                listings.append(listing)
+
+        return listings
+    except Exception as e:
+        print(f"  Vehicle link extraction failed: {e}")
+        return []
+
+
 def _parse_single_vehicle_text(text: str) -> dict:
     """Parse a single vehicle's details from a text block."""
     listing = {}
@@ -740,11 +833,21 @@ def _parse_listings_from_text_proximity(text: str) -> list[dict]:
 
 
 def _has_price_data(listings: list[dict]) -> bool:
-    """Check if at least some listings have price information."""
+    """Check if at least some listings have valid car-range price information."""
     if not listings:
         return False
-    with_price = sum(1 for l in listings if l.get("price"))
-    return with_price >= max(1, len(listings) * 0.3)
+    with_valid_price = 0
+    for l in listings:
+        price = str(l.get("price", ""))
+        price_digits = re.sub(r'[^\d]', '', price)
+        if price_digits:
+            try:
+                price_num = int(price_digits)
+                if 1000 <= price_num <= 999999:
+                    with_valid_price += 1
+            except (ValueError, OverflowError):
+                pass
+    return with_valid_price >= max(1, len(listings) * 0.3)
 
 
 def _save_api_debug(api_responses: list) -> None:
@@ -754,7 +857,7 @@ def _save_api_debug(api_responses: list) -> None:
         for resp in api_responses:
             debug_data.append({
                 "url": resp["url"],
-                "data_preview": json.dumps(resp["data"], indent=2, ensure_ascii=False)[:5000],
+                "data_preview": json.dumps(resp["data"], indent=2, ensure_ascii=False)[:20000],
             })
         with open("debug_api_responses.json", "w", encoding="utf-8") as f:
             json.dump(debug_data, f, indent=2, ensure_ascii=False)
@@ -778,7 +881,14 @@ def _log_api_response(url: str, data) -> None:
                         v_str = str(v)[:100]
                         print(f"      {k}: {v_str}")
             elif isinstance(val, dict):
-                print(f"  '{key}': dict with keys {list(val.keys())[:15]}")
+                all_keys = list(val.keys())
+                print(f"  '{key}': dict with {len(all_keys)} keys: {all_keys[:30]}")
+                # Log any sub-keys that are lists (may contain vehicle data)
+                for sk, sv in val.items():
+                    if isinstance(sv, list) and len(sv) > 0:
+                        print(f"    '{key}.{sk}': list of {len(sv)} items")
+                        if isinstance(sv[0], dict):
+                            print(f"      First item keys: {list(sv[0].keys())[:20]}")
             else:
                 v_str = str(val)[:100]
                 print(f"  '{key}': {v_str}")
@@ -976,14 +1086,25 @@ def _parse_api_response(data: dict | list) -> list[dict]:
     if isinstance(data, list):
         vehicles = data
     elif isinstance(data, dict):
-        # Check common top-level wrapper keys (case-insensitive)
+        vehicle_keys = {"results", "vehicles", "items", "data", "hits", "records",
+                        "offers", "listings", "searchresults", "content", "docs",
+                        "response", "inventory"}
+        # Check top-level wrapper keys (case-insensitive)
         for key in list(data.keys()):
             kl = key.lower()
-            if kl in ("results", "vehicles", "items", "data", "hits", "records",
-                       "offers", "listings", "searchresults", "content"):
+            if kl in vehicle_keys:
                 if isinstance(data[key], list):
                     vehicles = data[key]
                     break
+                # Check one level deeper (e.g. solr: data.search.results)
+                if isinstance(data[key], dict):
+                    for sub_key in data[key]:
+                        if sub_key.lower() in vehicle_keys:
+                            if isinstance(data[key][sub_key], list):
+                                vehicles = data[key][sub_key]
+                                break
+                    if vehicles:
+                        break
 
     for v in vehicles:
         if not isinstance(v, dict):
