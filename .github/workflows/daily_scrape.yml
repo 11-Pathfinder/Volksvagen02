@@ -50,5 +50,6 @@ jobs:
             listings.json
             debug_page.html
             debug_screenshot.png
+            debug_api_responses.json
           if-no-files-found: ignore
           retention-days: 30
