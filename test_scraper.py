@@ -520,6 +520,11 @@ def test_build_html_email():
     assert "Range (WLTP)" in html  # column header
     assert "<strong>3</strong> vehicle(s) found" in html
     assert "vehicle_search" in html
+    # Badge formatting: price < £25,000 and range > 300 get green badges
+    assert "background:#d4edda" in html, "Expected green badge styling"
+    # £25,990 is NOT < 25000 so should NOT be badged; £29,450 also not badged
+    # Range 318 miles IS > 300 so should be badged
+    assert 'border-radius:12px' in html
     print("  PASS test_build_html_email")
 
 
