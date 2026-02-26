@@ -233,8 +233,37 @@ def _scrape_via_browser() -> list[dict]:
                         break
 
                     try:
+                        # Capture a vehicle URL from current page to detect change
+                        first_link_before = None
+                        try:
+                            first_link_before = page.locator(
+                                'a[href*="/vehicle_search/volkswagen/id-"]'
+                            ).first.get_attribute("href", timeout=2000)
+                        except Exception:
+                            pass
+
+                        next_btn.scroll_into_view_if_needed()
                         next_btn.click()
-                        page.wait_for_timeout(3000)
+
+                        # Wait for content to actually change
+                        if first_link_before:
+                            href_escaped = first_link_before.replace("'", "\\'")
+                            try:
+                                page.wait_for_function(
+                                    f"""() => {{
+                                        const link = document.querySelector(
+                                            'a[href*="/vehicle_search/volkswagen/id-"]'
+                                        );
+                                        return link && link.getAttribute('href') !== '{href_escaped}';
+                                    }}""",
+                                    timeout=15000,
+                                )
+                            except Exception:
+                                # Fallback: just wait
+                                page.wait_for_timeout(5000)
+                        else:
+                            page.wait_for_timeout(5000)
+
                         # Scroll to trigger lazy-loaded content
                         for _ in range(3):
                             page.mouse.wheel(0, 600)
