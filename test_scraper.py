@@ -382,6 +382,44 @@ def test_parse_single_vehicle_text_minimal():
     print("  PASS test_parse_single_vehicle_text_minimal")
 
 
+def test_parse_single_vehicle_text_skips_finance_mileage():
+    """Test that mileage from finance disclosure is skipped."""
+    # Simulates a card container with real mileage + finance disclosure
+    text = (
+        "Volkswagen ID.4 125kW Life Ed Pure Perf 52kWh 5dr Auto\n"
+        "£21,050\n"
+        "16,725 miles\n"
+        "2024\n"
+        "Solutions Personal Contract Plan representative example: "
+        "Duration 48 Months, 47 Monthly payments of £306.35, "
+        "Vehicle price £21,050, "
+        "Expected / annual mileage 10,000 miles, "
+        "Excess mileage 8.24p per mile.\n"
+        "Personalise your finance"
+    )
+    result = _parse_single_vehicle_text(text)
+    assert result.get("price") == "£21,050", f"Price: {result.get('price')}"
+    assert "16,725" in result.get("mileage", ""), (
+        f"Expected 16,725 but got: {result.get('mileage')}"
+    )
+    print("  PASS test_parse_single_vehicle_text_skips_finance_mileage")
+
+
+def test_parse_single_vehicle_text_only_finance_mileage():
+    """When the only mileage is finance-related, result has no mileage."""
+    text = (
+        "Volkswagen ID.4\n"
+        "£21,050\n"
+        "Expected / annual mileage 10,000 miles\n"
+    )
+    result = _parse_single_vehicle_text(text)
+    assert result.get("price") == "£21,050"
+    assert not result.get("mileage"), (
+        f"Should have no mileage but got: {result.get('mileage')}"
+    )
+    print("  PASS test_parse_single_vehicle_text_only_finance_mileage")
+
+
 def test_parse_listings_from_text_proximity():
     """Test proximity-based text parsing finds vehicles even without double-newline separation."""
     text = (
@@ -561,6 +599,8 @@ def run_all_tests():
         test_deduplicate,
         test_parse_single_vehicle_text,
         test_parse_single_vehicle_text_minimal,
+        test_parse_single_vehicle_text_skips_finance_mileage,
+        test_parse_single_vehicle_text_only_finance_mileage,
         test_parse_listings_from_text_proximity,
         test_parse_listings_from_text_proximity_empty,
         test_has_price_data,
