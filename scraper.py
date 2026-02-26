@@ -705,16 +705,21 @@ def _extract_from_vehicle_links(page) -> list[dict]:
                 const urlPath = href.split('?')[0];
                 if (vehicles.has(urlPath)) continue;
 
-                // Walk up the DOM to find a card container with a real vehicle price
+                // Walk up the DOM to find a card container with price AND mileage.
+                // The card structure often has price in one child section and
+                // mileage in a sibling section, so we may need to go higher
+                // than the first container that has a price.
                 let el = link;
-                for (let i = 0; i < 10; i++) {
+                let priceOnly = null;   // first container with car price
+                let bestMatch = null;   // container with price + mileage
+
+                for (let i = 0; i < 12; i++) {
                     el = el.parentElement;
                     if (!el || el.tagName === 'BODY') break;
                     const fullText = el.innerText || '';
                     if (fullText.length < 30) continue;
-                    if (fullText.length > 5000) break;
+                    if (fullText.length > 8000) break;
 
-                    // Look for £ prices in the car price range (£5,000+)
                     const prices = fullText.match(/\\u00a3[\\d,]+/g) || [];
                     const hasCarPrice = prices.some(p => {
                         const num = parseInt(p.replace(/[\\u00a3,]/g, ''));
@@ -722,18 +727,29 @@ def _extract_from_vehicle_links(page) -> list[dict]:
                     });
 
                     if (hasCarPrice) {
-                        // Use cleaned text (finance sections stripped)
                         const cleanText = stripFinanceText(el);
-                        vehicles.set(urlPath, {
+                        const entry = {
                             url: href.startsWith('/')
                                 ? 'https://usedcars.volkswagen.co.uk' + href
                                 : href,
                             text: cleanText.substring(0, 1500),
                             fullText: fullText.substring(0, 1500),
                             level: i + 1,
-                        });
-                        break;
+                        };
+
+                        if (!priceOnly) priceOnly = entry;
+
+                        // Check if clean text has real mileage (not finance)
+                        if (/\\d[\\d,]*\\s*miles/i.test(cleanText)) {
+                            bestMatch = entry;
+                            break;
+                        }
                     }
+                }
+
+                const result = bestMatch || priceOnly;
+                if (result) {
+                    vehicles.set(urlPath, result);
                 }
             }
 
