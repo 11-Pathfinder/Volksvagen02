@@ -407,17 +407,21 @@ def test_parse_listings_from_text_proximity_empty():
 
 
 def test_has_price_data():
-    """Test the price quality gate."""
+    """Test the price quality gate with car-range validation."""
     # No listings
     assert not _has_price_data([])
-    # All have prices
+    # All have valid car prices
     assert _has_price_data([{"price": "£25,000"}, {"price": "£29,000"}])
     # None have prices
     assert not _has_price_data([{"title": "VW ID.4"}, {"title": "VW ID.5"}])
-    # Some have prices (50% > 30% threshold)
+    # Some have valid prices (50% > 30% threshold)
     assert _has_price_data([{"price": "£25,000"}, {"title": "VW ID.5"}])
-    # One listing with price
+    # One listing with valid price
     assert _has_price_data([{"price": "£25,000"}])
+    # Monthly payment prices (below £1,000) should NOT count as valid
+    assert not _has_price_data([{"price": "£306"}, {"price": "£207"}])
+    # Very small prices are not car prices
+    assert not _has_price_data([{"price": "£99"}, {"price": "£500"}])
     print("  PASS test_has_price_data")
 
 
