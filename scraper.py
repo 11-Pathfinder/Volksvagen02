@@ -476,9 +476,12 @@ def _extract_card_data(card) -> dict:
                 if year_match:
                     data["year"] = year_match.group(1)
             if not data.get("mileage"):
-                mile_match = re.search(r'([\d,]+)\s*(?:miles|mi)', full_text, re.IGNORECASE)
-                if mile_match:
-                    data["mileage"] = mile_match.group(1) + " miles"
+                for m in re.finditer(r'([\d,]+)\s*(?:miles|mi\b)', full_text, re.IGNORECASE):
+                    ctx = full_text[max(0, m.start() - 50):m.start()].lower()
+                    if any(w in ctx for w in ("annual", "expected", "excess")):
+                        continue
+                    data["mileage"] = m.group(1) + " miles"
+                    break
     except Exception:
         pass
 
@@ -576,12 +579,15 @@ def _extract_from_page_text(page) -> list[dict]:
                             year_match = re.search(r'\b(202[0-9])\b', text)
                             if year_match:
                                 listing["year"] = year_match.group(1)
-                            mile_match = re.search(
-                                r'([\d,]+)\s*(?:miles|mi)',
+                            for _m in re.finditer(
+                                r'([\d,]+)\s*(?:miles|mi\b)',
                                 text, re.IGNORECASE,
-                            )
-                            if mile_match:
-                                listing["mileage"] = mile_match.group(1) + " miles"
+                            ):
+                                _ctx = text[max(0, _m.start() - 50):_m.start()].lower()
+                                if any(w in _ctx for w in ("annual", "expected", "excess")):
+                                    continue
+                                listing["mileage"] = _m.group(1) + " miles"
+                                break
                             # Try to extract a title (model name)
                             title_match = re.search(
                                 r'((?:Volkswagen|VW)\s+ID\.[45]\S*(?:\s+\S+){0,8})',
@@ -632,9 +638,12 @@ def _parse_listings_from_text(text: str) -> list[dict]:
             price_match = re.search(r'(\u00a3[\d,]+)', block)
             if price_match:
                 listing["price"] = price_match.group(1)
-            mile_match = re.search(r'([\d,]+)\s*(?:miles|mi)', block, re.IGNORECASE)
-            if mile_match:
-                listing["mileage"] = mile_match.group(1) + " miles"
+            for _m in re.finditer(r'([\d,]+)\s*(?:miles|mi\b)', block, re.IGNORECASE):
+                _ctx = block[max(0, _m.start() - 50):_m.start()].lower()
+                if any(w in _ctx for w in ("annual", "expected", "excess")):
+                    continue
+                listing["mileage"] = _m.group(1) + " miles"
+                break
             year_match = re.search(r'\b(202[0-9])\b', block)
             if year_match:
                 listing["year"] = year_match.group(1)
@@ -659,6 +668,38 @@ def _extract_from_vehicle_links(page) -> list[dict]:
             }
             const vehicles = new Map();
 
+            // Phrases that indicate finance disclosure sections
+            const financeMarkers = [
+                'Personal Contract Plan',
+                'representative example',
+                'Personalise your finance',
+            ];
+
+            function stripFinanceText(el) {
+                // Build text from direct children, excluding finance sections
+                let parts = [];
+                for (const child of el.childNodes) {
+                    const t = (child.textContent || '').trim();
+                    if (!t) continue;
+                    const isFinance = financeMarkers.some(m => t.includes(m));
+                    if (!isFinance) {
+                        parts.push(child.nodeType === 3 ? t : (child.innerText || t));
+                    }
+                }
+                const cleaned = parts.join('\\n');
+                // If stripping removed too much, fall back to full text with
+                // finance sections removed via regex
+                if (cleaned.length < 20) {
+                    let full = el.innerText || '';
+                    full = full.replace(
+                        /Solutions Personal Contract Plan[\\s\\S]*?(?:per mile\\.|Personalise your finance)/gi,
+                        ''
+                    );
+                    return full.trim();
+                }
+                return cleaned;
+            }
+
             for (const link of links) {
                 const href = link.getAttribute('href') || '';
                 const urlPath = href.split('?')[0];
@@ -669,23 +710,26 @@ def _extract_from_vehicle_links(page) -> list[dict]:
                 for (let i = 0; i < 10; i++) {
                     el = el.parentElement;
                     if (!el || el.tagName === 'BODY') break;
-                    const text = el.innerText || '';
-                    if (text.length < 30) continue;
-                    if (text.length > 5000) break;
+                    const fullText = el.innerText || '';
+                    if (fullText.length < 30) continue;
+                    if (fullText.length > 5000) break;
 
                     // Look for £ prices in the car price range (£5,000+)
-                    const prices = text.match(/\\u00a3[\\d,]+/g) || [];
+                    const prices = fullText.match(/\\u00a3[\\d,]+/g) || [];
                     const hasCarPrice = prices.some(p => {
                         const num = parseInt(p.replace(/[\\u00a3,]/g, ''));
                         return num >= 5000 && num <= 100000;
                     });
 
                     if (hasCarPrice) {
+                        // Use cleaned text (finance sections stripped)
+                        const cleanText = stripFinanceText(el);
                         vehicles.set(urlPath, {
                             url: href.startsWith('/')
                                 ? 'https://usedcars.volkswagen.co.uk' + href
                                 : href,
-                            text: text.substring(0, 1500),
+                            text: cleanText.substring(0, 1500),
+                            fullText: fullText.substring(0, 1500),
                             level: i + 1,
                         });
                         break;
@@ -702,7 +746,9 @@ def _extract_from_vehicle_links(page) -> list[dict]:
         print(f"  Found {len(results)} vehicle card containers via link-walking")
         if results:
             first = results[0]
-            print(f"  Sample at DOM level {first.get('level')}: {first.get('text', '')[:300]}")
+            print(f"  Sample at DOM level {first.get('level')}:")
+            print(f"    Clean text: {first.get('text', '')[:300]}")
+            print(f"    Full text:  {first.get('fullText', '')[:300]}")
 
         listings = []
         for item in results:
@@ -740,9 +786,15 @@ def _parse_single_vehicle_text(text: str) -> dict:
     if year_match:
         listing["year"] = year_match.group(1)
 
-    mile_match = re.search(r'([\d,]+)\s*(?:miles|mi\b)', text, re.IGNORECASE)
-    if mile_match:
-        listing["mileage"] = mile_match.group(1) + " miles"
+    # Find all mileage mentions, skip ones from finance disclosures
+    # ("Expected / annual mileage 10,000 miles", "Excess mileage 8.24p")
+    mile_matches = list(re.finditer(r'([\d,]+)\s*(?:miles|mi\b)', text, re.IGNORECASE))
+    for m in mile_matches:
+        context_before = text[max(0, m.start() - 50):m.start()].lower()
+        if any(w in context_before for w in ("annual", "expected", "excess")):
+            continue
+        listing["mileage"] = m.group(1) + " miles"
+        break
 
     url_match = re.search(r'(/en/vehicle_search/volkswagen/[^\s"\'<>]+)', text)
     if url_match:
@@ -822,9 +874,12 @@ def _parse_listings_from_text_proximity(text: str) -> list[dict]:
         if year_match:
             listing["year"] = year_match.group(1)
 
-        mile_match = re.search(r'([\d,]+)\s*(?:miles|mi\b)', window, re.IGNORECASE)
-        if mile_match:
-            listing["mileage"] = mile_match.group(1) + " miles"
+        for _m in re.finditer(r'([\d,]+)\s*(?:miles|mi\b)', window, re.IGNORECASE):
+            _ctx = window[max(0, _m.start() - 50):_m.start()].lower()
+            if any(w in _ctx for w in ("annual", "expected", "excess")):
+                continue
+            listing["mileage"] = _m.group(1) + " miles"
+            break
 
         listing["raw_text"] = window[:500]
         listings.append(listing)
