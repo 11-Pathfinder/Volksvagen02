@@ -248,10 +248,22 @@ def _scrape_via_browser() -> list[dict]:
                 ("text", text_listings or []),
                 ("dom", dom_listings or []),
             ]
-            # Pick the candidate set with the most valid prices
+            # Pick the candidate set with the most valid car-range prices
+            def _count_valid_prices(candidates):
+                count = 0
+                for l in candidates:
+                    p = re.sub(r'[^\d]', '', str(l.get("price", "")))
+                    if p:
+                        try:
+                            if int(p) >= 1000:
+                                count += 1
+                        except (ValueError, OverflowError):
+                            pass
+                return count
+
             best_name, listings = max(
                 all_candidates,
-                key=lambda x: sum(1 for l in x[1] if l.get("price")),
+                key=lambda x: _count_valid_prices(x[1]),
             )
             if listings:
                 print(f"  Using best available: {best_name} ({len(listings)} listings)")
@@ -668,36 +680,21 @@ def _extract_from_vehicle_links(page) -> list[dict]:
             }
             const vehicles = new Map();
 
-            // Phrases that indicate finance disclosure sections
-            const financeMarkers = [
-                'Personal Contract Plan',
-                'representative example',
-                'Personalise your finance',
-            ];
-
             function stripFinanceText(el) {
-                // Build text from direct children, excluding finance sections
-                let parts = [];
-                for (const child of el.childNodes) {
-                    const t = (child.textContent || '').trim();
-                    if (!t) continue;
-                    const isFinance = financeMarkers.some(m => t.includes(m));
-                    if (!isFinance) {
-                        parts.push(child.nodeType === 3 ? t : (child.innerText || t));
-                    }
-                }
-                const cleaned = parts.join('\\n');
-                // If stripping removed too much, fall back to full text with
-                // finance sections removed via regex
-                if (cleaned.length < 20) {
-                    let full = el.innerText || '';
-                    full = full.replace(
-                        /Solutions Personal Contract Plan[\\s\\S]*?(?:per mile\\.|Personalise your finance)/gi,
-                        ''
-                    );
-                    return full.trim();
-                }
-                return cleaned;
+                // Remove finance disclosure text via regex from the full innerText.
+                // This preserves title/price/mileage while removing just the PCP section.
+                let text = el.innerText || '';
+                // Remove full PCP section including CTA button text
+                text = text.replace(
+                    /Solutions Personal Contract Plan[\\s\\S]*?Personalise your finance/gi,
+                    ''
+                );
+                // Fallback: remove PCP section ending at "per mile."
+                text = text.replace(
+                    /Solutions Personal Contract Plan[\\s\\S]*?per mile\\./gi,
+                    ''
+                );
+                return text.trim();
             }
 
             for (const link of links) {
