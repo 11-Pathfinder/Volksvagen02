@@ -5,6 +5,7 @@ Formats scraped listings into an HTML email and sends via SMTP.
 
 import json
 import os
+import re
 import smtplib
 import sys
 from datetime import datetime, timezone
@@ -35,6 +36,11 @@ def build_html_email(data: dict) -> str:
     except Exception:
         scraped_at_display = scraped_at
 
+    badge_style = (
+        "display:inline-block;background:#d4edda;color:#155724;"
+        "padding:2px 8px;border-radius:12px;font-weight:bold;"
+    )
+
     rows = ""
     for i, car in enumerate(listings, 1):
         title = car.get("title") or car.get("raw_text", "Unknown Vehicle")
@@ -48,6 +54,26 @@ def build_html_email(data: dict) -> str:
         if len(title) > 100:
             title = title[:100] + "..."
 
+        # Highlight price < £25,000
+        price_display = price
+        price_digits = re.sub(r'[^\d]', '', str(price))
+        if price_digits:
+            try:
+                if int(price_digits) < 25000:
+                    price_display = f'<span style="{badge_style}">{price}</span>'
+            except (ValueError, OverflowError):
+                pass
+
+        # Highlight range > 300 miles
+        range_display = battery_range
+        range_digits = re.sub(r'[^\d]', '', str(battery_range))
+        if range_digits:
+            try:
+                if int(range_digits) > 300:
+                    range_display = f'<span style="{badge_style}">{battery_range}</span>'
+            except (ValueError, OverflowError):
+                pass
+
         link_cell = f'<a href="{url}" style="color:#0066cc;">View</a>' if url else "N/A"
 
         bg_color = "#f9f9f9" if i % 2 == 0 else "#ffffff"
@@ -55,10 +81,10 @@ def build_html_email(data: dict) -> str:
         <tr style="background-color:{bg_color};">
             <td style="padding:10px;border-bottom:1px solid #e0e0e0;">{i}</td>
             <td style="padding:10px;border-bottom:1px solid #e0e0e0;">{title}</td>
-            <td style="padding:10px;border-bottom:1px solid #e0e0e0;">{price}</td>
+            <td style="padding:10px;border-bottom:1px solid #e0e0e0;">{price_display}</td>
             <td style="padding:10px;border-bottom:1px solid #e0e0e0;">{mileage}</td>
             <td style="padding:10px;border-bottom:1px solid #e0e0e0;">{year}</td>
-            <td style="padding:10px;border-bottom:1px solid #e0e0e0;">{battery_range}</td>
+            <td style="padding:10px;border-bottom:1px solid #e0e0e0;">{range_display}</td>
             <td style="padding:10px;border-bottom:1px solid #e0e0e0;">{link_cell}</td>
         </tr>"""
 
