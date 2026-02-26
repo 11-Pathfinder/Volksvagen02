@@ -210,11 +210,54 @@ def _scrape_via_browser() -> list[dict]:
                 browser.close()
                 return listings
 
-            # Step 3: Smart vehicle-link extraction (walks from <a> tags to card containers)
+            # Step 3: Smart vehicle-link extraction with pagination
             print("  Trying vehicle-link extraction...")
             link_listings = _extract_from_vehicle_links(page)
             if link_listings:
-                print(f"  Found {len(link_listings)} from vehicle-link extraction.")
+                print(f"  Page 1: found {len(link_listings)} listings.")
+
+                # Paginate: click "next" to get all pages
+                max_pages = 15  # safety limit (~300 vehicles)
+                for page_num in range(2, max_pages + 1):
+                    next_btn = page.locator(
+                        ".results__pagination--button-next:not(.disabled), "
+                        "button:has-text('Next'):not([disabled]), "
+                        "a.next:not(.disabled)"
+                    ).first
+                    try:
+                        if not next_btn.is_visible(timeout=3000):
+                            print(f"  No more pages (stopped at page {page_num - 1}).")
+                            break
+                    except Exception:
+                        print(f"  No more pages (stopped at page {page_num - 1}).")
+                        break
+
+                    try:
+                        next_btn.click()
+                        page.wait_for_timeout(3000)
+                        # Scroll to trigger lazy-loaded content
+                        for _ in range(3):
+                            page.mouse.wheel(0, 600)
+                            page.wait_for_timeout(800)
+                        page.wait_for_timeout(1000)
+
+                        page_listings = _extract_from_vehicle_links(page)
+                        if not page_listings:
+                            print(f"  Page {page_num}: no listings found, stopping.")
+                            break
+                        # Avoid adding duplicates from the same page
+                        existing_urls = {l.get("url") for l in link_listings}
+                        new = [l for l in page_listings if l.get("url") not in existing_urls]
+                        if not new:
+                            print(f"  Page {page_num}: no new listings, stopping.")
+                            break
+                        link_listings.extend(new)
+                        print(f"  Page {page_num}: +{len(new)} listings (total: {len(link_listings)}).")
+                    except Exception as e:
+                        print(f"  Pagination stopped at page {page_num}: {e}")
+                        break
+
+                print(f"  Found {len(link_listings)} total from vehicle-link extraction.")
                 if _has_price_data(link_listings):
                     _save_debug_artifacts(page)
                     browser.close()
