@@ -41,6 +41,7 @@ def build_html_email(data: dict) -> str:
         price = car.get("price", "N/A")
         mileage = car.get("mileage", "N/A")
         year = car.get("year", "N/A")
+        battery_range = car.get("range", "N/A")
         url = car.get("url", "")
 
         # Clean up title if it's raw text
@@ -57,13 +58,14 @@ def build_html_email(data: dict) -> str:
             <td style="padding:10px;border-bottom:1px solid #e0e0e0;">{price}</td>
             <td style="padding:10px;border-bottom:1px solid #e0e0e0;">{mileage}</td>
             <td style="padding:10px;border-bottom:1px solid #e0e0e0;">{year}</td>
+            <td style="padding:10px;border-bottom:1px solid #e0e0e0;">{battery_range}</td>
             <td style="padding:10px;border-bottom:1px solid #e0e0e0;">{link_cell}</td>
         </tr>"""
 
     if not rows:
         rows = """
         <tr>
-            <td colspan="6" style="padding:20px;text-align:center;color:#666;">
+            <td colspan="7" style="padding:20px;text-align:center;color:#666;">
                 No listings found matching your criteria today.
             </td>
         </tr>"""
@@ -91,6 +93,7 @@ def build_html_email(data: dict) -> str:
                             <th style="padding:10px;text-align:left;">Price</th>
                             <th style="padding:10px;text-align:left;">Mileage</th>
                             <th style="padding:10px;text-align:left;">Year</th>
+                            <th style="padding:10px;text-align:left;">Range (WLTP)</th>
                             <th style="padding:10px;text-align:left;">Link</th>
                         </tr>
                     </thead>
@@ -132,10 +135,11 @@ def build_plain_text(data: dict) -> str:
         price = car.get("price", "N/A")
         mileage = car.get("mileage", "N/A")
         year = car.get("year", "N/A")
+        battery_range = car.get("range", "N/A")
         url = car.get("url", "")
 
         lines.append(f"{i}. {title}")
-        lines.append(f"   Price: {price} | Mileage: {mileage} | Year: {year}")
+        lines.append(f"   Price: {price} | Mileage: {mileage} | Year: {year} | Range: {battery_range}")
         if url:
             lines.append(f"   Link: {url}")
         lines.append("")

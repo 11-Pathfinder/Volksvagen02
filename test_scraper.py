@@ -32,6 +32,7 @@ SAMPLE_LISTINGS = [
         "price": "£25,990",
         "mileage": "8,500 miles",
         "year": "2024",
+        "range": "223 miles",
         "url": "https://usedcars.volkswagen.co.uk/en/vehicle_search/volkswagen/id-4/pure-perf-abc123/offer",
     },
     {
@@ -39,6 +40,7 @@ SAMPLE_LISTINGS = [
         "price": "£29,450",
         "mileage": "3,200 miles",
         "year": "2024",
+        "range": "318 miles",
         "url": "https://usedcars.volkswagen.co.uk/en/vehicle_search/volkswagen/id-5/gtx-def456/offer",
     },
     {
@@ -46,6 +48,7 @@ SAMPLE_LISTINGS = [
         "price": "£27,500",
         "mileage": "12,100 miles",
         "year": "2024",
+        "range": "311 miles",
         "url": "https://usedcars.volkswagen.co.uk/en/vehicle_search/volkswagen/id-4/pro-perf-ghi789/offer",
     },
 ]
@@ -363,12 +366,15 @@ def test_parse_single_vehicle_text():
 £25,990
 8,500 miles
 2024
+Battery range (WLTP):
+223 miles
 /en/vehicle_search/volkswagen/id-4/abc123/offer"""
     result = _parse_single_vehicle_text(text)
     assert "ID.4" in result.get("title", ""), f"Title: {result.get('title')}"
     assert result.get("price") == "£25,990", f"Price: {result.get('price')}"
     assert "8,500" in result.get("mileage", ""), f"Mileage: {result.get('mileage')}"
     assert result.get("year") == "2024", f"Year: {result.get('year')}"
+    assert result.get("range") == "223 miles", f"Range: {result.get('range')}"
     assert "vehicle_search" in result.get("url", ""), f"URL: {result.get('url')}"
     print("  PASS test_parse_single_vehicle_text")
 
@@ -510,6 +516,8 @@ def test_build_html_email():
     assert "£25,990" in html
     assert "£29,450" in html
     assert "8,500 miles" in html
+    assert "223 miles" in html  # battery range
+    assert "Range (WLTP)" in html  # column header
     assert "<strong>3</strong> vehicle(s) found" in html
     assert "vehicle_search" in html
     print("  PASS test_build_html_email")
@@ -542,6 +550,7 @@ def test_build_plain_text():
     assert "Volkswagen Used Cars - Daily Report" in text
     assert "VW ID.4" in text or "ID.4" in text
     assert "£25,990" in text
+    assert "Range: 223 miles" in text  # battery range in plain text
     assert "Total vehicles found: 3" in text
     print("  PASS test_build_plain_text")
 

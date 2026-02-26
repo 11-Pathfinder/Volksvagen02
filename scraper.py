@@ -885,6 +885,14 @@ def _parse_single_vehicle_text(text: str) -> dict:
     if url_match:
         listing["url"] = "https://usedcars.volkswagen.co.uk" + url_match.group(1)
 
+    # Battery range (WLTP) — format: "Battery range (WLTP):\n223 miles"
+    range_match = re.search(
+        r'Battery\s+range\s*\(WLTP\)\s*:\s*\n?\s*([\d,]+)\s*miles',
+        text, re.IGNORECASE,
+    )
+    if range_match:
+        listing["range"] = range_match.group(1) + " miles"
+
     listing["raw_text"] = text[:500]
     return listing
 
