@@ -44,7 +44,7 @@ def main():
 
     data = load_listings(listings_path)
     today = datetime.now(timezone.utc).strftime("%d %b %Y")
-    subject = f"VW ID.4/ID.5 Used Cars Report - {today} ({total} found)"
+    subject = f"ID5 listings - {today} ({total} found)"
 
     html_body = build_html_email(data)
     text_body = build_plain_text(data)
