@@ -22,7 +22,7 @@ except ImportError:
 
 SEARCH_URL = (
     "https://usedcars.volkswagen.co.uk/en/vehicle_search/volkswagen?"
-    "POOLS_CSV=47-12532-217084&RADIUS_LEN_FLT=900"
+    "POOLS_CSV=47-12532-217084&RADIUS_LEN_FLT=2000"
     "&PRICE_RETAIL_CUR_FLT_TO=30000&MILEAGE_MIL_INT_TO=20000"
     "&INITIAL_REGISTRATION_DTE_FROM=2023&search=passenger"
     "&MANUFACTURER_LST=VOLKSWAGEN&priceSwitch=on"

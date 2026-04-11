@@ -104,7 +104,7 @@ def build_html_email(data: dict) -> str:
         <div style="max-width:800px;margin:0 auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 4px rgba(0,0,0,0.1);">
             <div style="background:#001e50;color:#fff;padding:20px 30px;">
                 <h1 style="margin:0;font-size:22px;">Volkswagen Used Cars - Daily Report</h1>
-                <p style="margin:8px 0 0;opacity:0.85;font-size:14px;">ID.4 &amp; ID.5 | Under &pound;30,000 | Under 20,000 miles | 2024+</p>
+                <p style="margin:8px 0 0;opacity:0.85;font-size:14px;">ID.5 | Under &pound;30,000 | Under 20,000 miles | 2023+</p>
             </div>
             <div style="padding:20px 30px;">
                 <p style="color:#333;font-size:14px;">
