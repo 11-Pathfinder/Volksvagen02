@@ -893,6 +893,14 @@ def _parse_single_vehicle_text(text: str) -> dict:
     if range_match:
         listing["range"] = range_match.group(1) + " miles"
 
+    # Exterior colour — format: "Exterior colour:\nDeep Black" or "Colour: Moonstone Grey"
+    colour_match = re.search(
+        r'(?:Exterior\s+)?(?:colour|color)\s*:\s*\n?\s*([A-Za-z][A-Za-z\s]{1,40})',
+        text, re.IGNORECASE,
+    )
+    if colour_match:
+        listing["exterior_colour"] = colour_match.group(1).strip()
+
     listing["raw_text"] = text[:500]
     return listing
 
@@ -1367,12 +1375,16 @@ def _extract_vehicle_fields(obj: dict) -> dict:
         if year_match:
             year_str = year_match.group(1)
 
+    exterior_colour = _get("exterior_colour", "exteriorcolour", "exterior_color",
+                           "exteriorcolor", "colour", "color")
+
     return {
         "title": str(title),
         "price": price_str,
         "mileage": mileage_str,
         "year": year_str,
         "url": str(url),
+        "exterior_colour": str(exterior_colour),
     }
 
 

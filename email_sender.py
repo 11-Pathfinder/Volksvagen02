@@ -48,6 +48,7 @@ def build_html_email(data: dict) -> str:
         mileage = car.get("mileage", "N/A")
         year = car.get("year", "N/A")
         battery_range = car.get("range", "N/A")
+        exterior_colour = car.get("exterior_colour", "N/A")
         url = car.get("url", "")
 
         # Clean up title if it's raw text
@@ -64,15 +65,20 @@ def build_html_email(data: dict) -> str:
             except (ValueError, OverflowError):
                 pass
 
-        # Highlight range > 300 miles
-        range_display = battery_range
-        range_digits = re.sub(r'[^\d]', '', str(battery_range))
-        if range_digits:
+        # Highlight year > 2024
+        year_display = year
+        year_digits = re.sub(r'[^\d]', '', str(year))
+        if year_digits:
             try:
-                if int(range_digits) > 300:
-                    range_display = f'<span style="{badge_style}">{battery_range}</span>'
+                if int(year_digits) > 2024:
+                    year_display = f'<span style="{badge_style}">{year}</span>'
             except (ValueError, OverflowError):
                 pass
+
+        # Highlight exterior colour if black
+        colour_display = exterior_colour
+        if exterior_colour and "black" in str(exterior_colour).lower():
+            colour_display = f'<span style="{badge_style}">{exterior_colour}</span>'
 
         link_cell = f'<a href="{url}" style="color:#0066cc;">View</a>' if url else "N/A"
 
@@ -83,15 +89,16 @@ def build_html_email(data: dict) -> str:
             <td style="padding:10px;border-bottom:1px solid #e0e0e0;">{title}</td>
             <td style="padding:10px;border-bottom:1px solid #e0e0e0;">{price_display}</td>
             <td style="padding:10px;border-bottom:1px solid #e0e0e0;">{mileage}</td>
-            <td style="padding:10px;border-bottom:1px solid #e0e0e0;">{year}</td>
-            <td style="padding:10px;border-bottom:1px solid #e0e0e0;">{range_display}</td>
+            <td style="padding:10px;border-bottom:1px solid #e0e0e0;">{year_display}</td>
+            <td style="padding:10px;border-bottom:1px solid #e0e0e0;">{battery_range}</td>
+            <td style="padding:10px;border-bottom:1px solid #e0e0e0;">{colour_display}</td>
             <td style="padding:10px;border-bottom:1px solid #e0e0e0;">{link_cell}</td>
         </tr>"""
 
     if not rows:
         rows = """
         <tr>
-            <td colspan="7" style="padding:20px;text-align:center;color:#666;">
+            <td colspan="8" style="padding:20px;text-align:center;color:#666;">
                 No listings found matching your criteria today.
             </td>
         </tr>"""
@@ -120,6 +127,7 @@ def build_html_email(data: dict) -> str:
                             <th style="padding:10px;text-align:left;">Mileage</th>
                             <th style="padding:10px;text-align:left;">Year</th>
                             <th style="padding:10px;text-align:left;">Range (WLTP)</th>
+                            <th style="padding:10px;text-align:left;">Exterior Colour</th>
                             <th style="padding:10px;text-align:left;">Link</th>
                         </tr>
                     </thead>
@@ -150,7 +158,7 @@ def build_plain_text(data: dict) -> str:
     lines = [
         "Volkswagen Used Cars - Daily Report",
         "=" * 40,
-        f"ID.4 & ID.5 | Under £30,000 | Under 20,000 miles | 2024+",
+        f"ID.5 | Under £30,000 | Under 20,000 miles | 2023+",
         f"Scraped: {scraped_at}",
         f"Total vehicles found: {total}",
         "",
@@ -165,7 +173,8 @@ def build_plain_text(data: dict) -> str:
         url = car.get("url", "")
 
         lines.append(f"{i}. {title}")
-        lines.append(f"   Price: {price} | Mileage: {mileage} | Year: {year} | Range: {battery_range}")
+        exterior_colour = car.get("exterior_colour", "N/A")
+        lines.append(f"   Price: {price} | Mileage: {mileage} | Year: {year} | Range: {battery_range} | Colour: {exterior_colour}")
         if url:
             lines.append(f"   Link: {url}")
         lines.append("")
