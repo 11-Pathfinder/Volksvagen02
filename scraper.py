@@ -20,7 +20,7 @@ except ImportError:
     sync_playwright = None
 
 
-SEARCH_URL = (
+_DEFAULT_SEARCH_URL = (
     "https://usedcars.volkswagen.co.uk/en/vehicle_search/volkswagen?"
     "POOLS_CSV=47-12532-217084&RADIUS_LEN_FLT=2000"
     "&PRICE_RETAIL_CUR_FLT_TO=30000&MILEAGE_MIL_INT_TO=20000"
@@ -29,6 +29,8 @@ SEARCH_URL = (
     "&MODEL_TYPE_LST=VOLKSWAGEN_ID_5"
     "&ZIP_LOC=SW20%209DQ&sort=PRICE_RETAIL_CUR_FLT:ASC"
 )
+
+SEARCH_URL = os.environ.get("SEARCH_URL", _DEFAULT_SEARCH_URL)
 
 OUTPUT_FILE = "listings.json"
 

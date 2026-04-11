@@ -44,7 +44,8 @@ def main():
 
     data = load_listings(listings_path)
     today = datetime.now(timezone.utc).strftime("%d %b %Y")
-    subject = f"ID5 listings - {today} ({total} found)"
+    subject_prefix = os.environ.get("EMAIL_SUBJECT_PREFIX", "ID5 listings")
+    subject = f"{subject_prefix} - {today} ({total} found)"
 
     html_body = build_html_email(data)
     text_body = build_plain_text(data)

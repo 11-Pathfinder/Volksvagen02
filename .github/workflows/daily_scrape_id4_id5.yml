@@ -1,0 +1,52 @@
+name: Daily VW ID.4 & ID.5 Scrape
+
+on:
+  # Run every day at 7:00 AM UTC
+  schedule:
+    - cron: "0 7 * * *"
+
+  # Allow manual triggering from the Actions tab
+  workflow_dispatch:
+
+jobs:
+  scrape-and-email:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install requests beautifulsoup4 playwright
+          playwright install chromium
+          playwright install-deps chromium
+
+      - name: Run scraper and send email
+        env:
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST || 'smtp.gmail.com' }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT || '587' }}
+          EMAIL_RECIPIENT: "mohit.sanwal@gmail.com"
+          EMAIL_SUBJECT_PREFIX: "ID4 & ID5 listings"
+          SEARCH_URL: "https://usedcars.volkswagen.co.uk/en/vehicle_search/volkswagen?POOLS_CSV=47-12532-217084&RADIUS_LEN_FLT=900&PRICE_RETAIL_CUR_FLT_TO=30000&MILEAGE_MIL_INT_TO=20000&INITIAL_REGISTRATION_DTE_FROM=2024&search=passenger&MANUFACTURER_LST=VOLKSWAGEN&priceSwitch=on&MODEL_TYPE_LST=VOLKSWAGEN_ID_4||VOLKSWAGEN_ID_5&ZIP_LOC=SW20%209DQ&sort=PRICE_RETAIL_CUR_FLT:ASC"
+        run: xvfb-run python main.py
+
+      - name: Upload debug artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-id4-id5-${{ github.run_number }}
+          path: |
+            listings.json
+            debug_page.html
+            debug_screenshot.png
+            debug_api_responses.json
+          if-no-files-found: ignore
+          retention-days: 30
