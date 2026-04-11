@@ -895,7 +895,7 @@ def _parse_single_vehicle_text(text: str) -> dict:
 
     # Exterior colour — format: "Exterior colour:\nDeep Black" or "Colour: Moonstone Grey"
     colour_match = re.search(
-        r'(?:Exterior\s+)?(?:colour|color)\s*:\s*\n?\s*([A-Za-z][A-Za-z\s]{1,40})',
+        r'(?:Exterior\s+)?(?:colour|color)\s*:\s*\n?\s*([A-Za-z][A-Za-z\s]{1,40}?)(?=\s*(?:Interior|Fuel|Gearbox|Transmission|Mileage|Battery|\n\n|$))',
         text, re.IGNORECASE,
     )
     if colour_match:
